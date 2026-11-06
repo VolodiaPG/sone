@@ -404,6 +404,12 @@ Docker-based build scripts are provided in `build-scripts/build/` to produce dis
 
 Output goes to `dist/<format>/`. Pass `--no-cache` to force a clean Docker build.
 
+On macOS, run the native build script. It does not use Docker. It needs the macOS dependencies listed above.
+
+```bash
+./build-scripts/build/macos.sh            # Build SONE.app and the .dmg into dist/macos/
+```
+
 ## Usage
 
 1. Launch the app
