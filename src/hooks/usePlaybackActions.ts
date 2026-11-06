@@ -150,7 +150,7 @@ function extractPlaybackError(error: unknown): string {
   return typeof msg === "string" ? msg : "Playback failed";
 }
 
-/** Check if an error is a device_busy error from exclusive ALSA mode. */
+/** Check if an error is a device_busy error from exclusive mode (ALSA / Core Audio). */
 function isDeviceBusy(error: unknown): boolean {
   return extractPlaybackError(error) === "device_busy";
 }

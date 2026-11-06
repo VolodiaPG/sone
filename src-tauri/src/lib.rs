@@ -1,6 +1,8 @@
 mod audio;
 pub mod cache;
 mod commands;
+#[cfg(target_os = "macos")]
+mod coreaudio_output;
 mod crypto;
 mod discord;
 mod discord_ipc;
@@ -713,7 +715,7 @@ pub fn run() {
             {
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
-                    if let Ok(devices) = crate::audio::list_alsa_devices() {
+                    if let Ok(devices) = crate::audio::list_output_devices() {
                         let state = handle.state::<AppState>();
                         *state.cached_audio_devices.lock().unwrap() = Some(devices);
                     }

@@ -58,7 +58,7 @@ export default function FlowDiagramBody({
     normFactor,
     userVolAltered,
     normAltered,
-    isDirectAlsa,
+    isExclusiveOutput,
     isPristine,
     losslessPromotion,
   } = deriveAlterations(sp);
@@ -91,7 +91,7 @@ export default function FlowDiagramBody({
     fmt: string | null;
     rate: number | null;
     tertiary: string | null;
-  } = isDirectAlsa
+  } = isExclusiveOutput
     ? {
         fmt: sp?.outputFormat ?? null,
         rate: sp?.outputRate ?? null,
@@ -130,14 +130,16 @@ export default function FlowDiagramBody({
       title: "DAC",
       // Normal mode: our pipeline caps say nothing about the device — the OS mixer owns it.
       primary: displayFormat(
-        sp?.dac?.format ?? (isDirectAlsa ? sp?.outputFormat : null) ?? null,
+        sp?.dac?.format ??
+          (isExclusiveOutput ? sp?.outputFormat : null) ??
+          null,
       ),
       secondary: formatRate(
-        sp?.dac?.rate ?? (isDirectAlsa ? sp?.outputRate : null) ?? null,
+        sp?.dac?.rate ?? (isExclusiveOutput ? sp?.outputRate : null) ?? null,
       ),
       tertiary:
         sp?.dac?.cardName ??
-        (isDirectAlsa
+        (isExclusiveOutput
           ? sp?.outputChannels
             ? `${sp.outputChannels}ch`
             : null
@@ -184,7 +186,7 @@ export default function FlowDiagramBody({
   // preserved; only the byte layout differs. Flagged as altered-lossless
   // (yellow), not lossy (red).
   const containerRepack =
-    isDirectAlsa &&
+    isExclusiveOutput &&
     !!sp?.decodedFormat &&
     !!sp?.outputFormat &&
     !formatsEquivalent(sp.decodedFormat, sp.outputFormat);
@@ -205,7 +207,7 @@ export default function FlowDiagramBody({
   // uses "s24le") — compare case-insensitively.
   const mixerRate = sp?.osMixer?.sinkRate ?? null;
   const mixerDiverges =
-    !isDirectAlsa &&
+    !isExclusiveOutput &&
     !!sp?.osMixer?.sinkFormat &&
     !!sp?.decodedFormat &&
     (!formatsEquivalent(sp.decodedFormat, sp.osMixer.sinkFormat) ||
@@ -294,9 +296,9 @@ export default function FlowDiagramBody({
   // Skipped for DirectAlsa because we own the device exclusively (OS mixer is
   // bypassed). EPS_VOL guards against floating-point noise around 1.0.
   const EPS_VOL = 1e-3;
-  const osMuted = !isDirectAlsa && !!sp?.osMixer && sp.osMixer.sinkMuted;
+  const osMuted = !isExclusiveOutput && !!sp?.osMixer && sp.osMixer.sinkMuted;
   const osVolumeAltered =
-    !isDirectAlsa &&
+    !isExclusiveOutput &&
     !!sp?.osMixer &&
     !sp.osMixer.sinkMuted &&
     Math.abs(sp.osMixer.sinkVolume - 1.0) > EPS_VOL;
@@ -318,7 +320,9 @@ export default function FlowDiagramBody({
   // Normal mode: virtual sinks (EQ, crossfeed, convolution, loopbacks)
   // between our stream and the device can rewrite samples, and a hop pinned
   // to its own rate resamples. SONE can't see inside them, so surface them.
-  const virtualRoute = !isDirectAlsa ? (sp?.osMixer?.virtualRoute ?? []) : [];
+  const virtualRoute = !isExclusiveOutput
+    ? (sp?.osMixer?.virtualRoute ?? [])
+    : [];
   if (virtualRoute.length > 0) {
     cable2Alterations.push({
       state: "altered",
@@ -352,7 +356,7 @@ export default function FlowDiagramBody({
   // spec (what PipeWire actually delivers to the kernel), NOT our pipeline
   // output. In DirectAlsa we own the device so outputFormat IS what reaches
   // the kernel.
-  const upstreamFormat = isDirectAlsa
+  const upstreamFormat = isExclusiveOutput
     ? (sp?.outputFormat ?? null)
     : (sp?.osMixer?.sinkFormat ?? sp?.outputFormat ?? null);
   // A route's last hop is what reaches the device.
@@ -360,7 +364,7 @@ export default function FlowDiagramBody({
     virtualRoute.length > 0
       ? virtualRoute[virtualRoute.length - 1].rate
       : (sp?.osMixer?.sinkRate ?? null);
-  const upstreamRate = isDirectAlsa
+  const upstreamRate = isExclusiveOutput
     ? (sp?.outputRate ?? null)
     : sp?.osMixer
       ? routeOutRate
@@ -377,7 +381,7 @@ export default function FlowDiagramBody({
   // rewrote the samples after hand-off: no virtual sinks, unity OS volume,
   // and the mixer kept our rate.
   const samplesUntouched =
-    !isDirectAlsa &&
+    !isExclusiveOutput &&
     virtualRoute.length === 0 &&
     !osMuted &&
     !osVolumeAltered &&
@@ -397,7 +401,7 @@ export default function FlowDiagramBody({
     cable2Alterations.push({
       state: dacState,
       label: "OS-LAYER CONVERSION",
-      detail: `${isDirectAlsa ? "pipeline" : "mixer"} ${displayFormat(upstreamFormat)}/${formatRate(upstreamRate)} → DAC ${displayFormat(sp!.dac!.format)}/${formatRate(sp!.dac!.rate)}`,
+      detail: `${isExclusiveOutput ? "pipeline" : "mixer"} ${displayFormat(upstreamFormat)}/${formatRate(upstreamRate)} → DAC ${displayFormat(sp!.dac!.format)}/${formatRate(sp!.dac!.rate)}`,
       reason:
         dacState === "altered"
           ? `${dacServer} widened/repacked the stream before it reached ALSA — audio bits preserved`
@@ -410,7 +414,7 @@ export default function FlowDiagramBody({
   // device's running rate, so a pinned last hop's resample isn't hidden.
   const deviceRate = sp?.osMixer?.deviceRate ?? null;
   const deviceResample =
-    !isDirectAlsa &&
+    !isExclusiveOutput &&
     sp?.dac?.state !== "Active" &&
     upstreamRate !== null &&
     deviceRate !== null &&

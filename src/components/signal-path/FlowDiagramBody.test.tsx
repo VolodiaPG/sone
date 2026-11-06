@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
 
 import FlowDiagramBody from "./FlowDiagramBody";
+import { deriveAlterations, isExclusiveBackend, backendLabel } from "./types";
 import type {
   SignalPath,
   OsMixerInfo,
@@ -322,6 +323,29 @@ describe("FlowDiagramBody mixer stage (issue #244)", () => {
     });
     expect(nodeText(sp, "DAC")).toBe("DACS24_32LE96 kHz2ch");
     expect(textOf(sp)).not.toContain("VIRTUAL ROUTING");
+  });
+
+  it("treats CoreAudio like DirectAlsa: pristine, DAC from output caps", () => {
+    const sp = normalSp({
+      backend: "CoreAudio",
+      exclusiveMode: true,
+      outputFormat: "S24LE",
+      outputRate: 44100,
+      dac: null,
+      osMixer: null,
+    });
+    expect(isExclusiveBackend("CoreAudio")).toBe(true);
+    expect(isExclusiveBackend("DirectAlsa")).toBe(true);
+    expect(isExclusiveBackend("Normal")).toBe(false);
+    expect(isExclusiveBackend(undefined)).toBe(false);
+    expect(deriveAlterations(sp).isPristine).toBe(true);
+    expect(
+      deriveAlterations({ ...sp, resampledFrom: 96000, resampledTo: 44100 })
+        .isPristine,
+    ).toBe(false);
+    expect(nodeText(sp, "DAC")).toBe("DACS24LE44.1 kHz2ch");
+    expect(backendLabel("CoreAudio")).toBe("Core Audio (hog mode)");
+    expect(backendLabel("DirectAlsa")).toBe("DirectAlsa");
   });
 
   it("omits the virtual routing row for a direct device route", () => {

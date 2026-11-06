@@ -82,6 +82,8 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSData", "NSDictionary", "NSString", "NSValue"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSImage", "std"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["CFCGTypes", "CFString", "std"] }
+objc2-core-audio = { version = "0.3", default-features = false, features = ["std", "AudioHardware", "objc2-core-audio-types"] }
+objc2-core-audio-types = { version = "0.3", default-features = false, features = ["std", "CoreAudioBaseTypes"] }
 objc2-media-player = { version = "0.3", default-features = false, features = ["MPRemoteCommandCenter", "MPRemoteCommand", "MPRemoteCommandEvent", "MPNowPlayingInfoCenter", "MPMediaItem", "block2", "std", "objc2-app-kit", "objc2-core-foundation"] }
 
 [dev-dependencies]

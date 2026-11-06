@@ -2042,6 +2042,14 @@ impl AudioPlayer {
             // force a respawn rather than reuse a stale-mode writer.
             #[cfg_attr(not(target_os = "linux"), allow(unused_mut, unused_variables))]
             let mut writer_bit_perfect: Option<bool> = None;
+            // macOS exclusive output: the device held in hog mode, by UID. It
+            // stays held across tracks, like the ALSA writer on Linux.
+            #[cfg(target_os = "macos")]
+            let mut hog: Option<Hog> = None;
+            // The previous Normal pipeline's async teardown. The device format
+            // must not change while that pipeline still plays into it.
+            #[cfg(target_os = "macos")]
+            let mut normal_teardown: Option<JoinHandle<()>> = None;
             let frames_written = Arc::new(AtomicU64::new(0));
             let current_sample_rate = Arc::new(AtomicU32::new(48000));
             let writer_gen = Arc::new(AtomicU64::new(0));
@@ -2145,7 +2153,7 @@ impl AudioPlayer {
                                             bus.set_flushing(true);
                                         }
                                         let old_pipe = pipeline;
-                                        std::thread::spawn(move || {
+                                        let teardown = std::thread::spawn(move || {
                                             // Fade out
                                             if let Some(ref vol) = user_volume_el {
                                                 for i in (0..=10).rev() {
@@ -2155,6 +2163,12 @@ impl AudioPlayer {
                                             }
                                             old_pipe.set_state(gst::State::Null).ok();
                                         });
+                                        #[cfg(target_os = "macos")]
+                                        {
+                                            normal_teardown = Some(teardown);
+                                        }
+                                        #[cfg(not(target_os = "macos"))]
+                                        drop(teardown);
                                     }
                                     PlaybackBackend::DirectAlsa { pipeline, sink_closing, .. } => {
                                         // Unblock writer if paused, then bump generation —
@@ -2202,7 +2216,7 @@ impl AudioPlayer {
                             *output_cell_thread.lock().unwrap() = None;
                             signal_path.reset_for_track();
                             if exclusive || bit_perfect {
-                                signal_path.set_backend("DirectAlsa", device.clone());
+                                signal_path.set_backend(EXCLUSIVE_BACKEND, device.clone());
                             } else {
                                 signal_path.set_backend("Normal", None);
                             }
@@ -2238,11 +2252,10 @@ impl AudioPlayer {
                             // build with the generation this route came from.
                             pipeline_route_generation = route_generation.load(Ordering::Acquire);
 
-                            if exclusive || bit_perfect {
+                            // macOS exclusive output runs on the Normal pipeline
+                            // below, with the sink pinned to a hogged device.
+                            if (exclusive || bit_perfect) && cfg!(target_os = "linux") {
                                 // ── DirectAlsa path ──
-                                #[cfg(not(target_os = "linux"))]
-                                return Err("Exclusive/bit-perfect mode requires Linux".into());
-
                                 #[cfg(target_os = "linux")]
                                 {
                                     let dev = device.as_deref().ok_or_else(|| {
@@ -2425,6 +2438,22 @@ impl AudioPlayer {
                                 // The sound server can't take a DAC an old writer still holds.
                                 reap_lingering_writers(&mut lingering_writers, WRITER_REAP_TIMEOUT);
 
+                                #[cfg(target_os = "macos")]
+                                let exclusive_device = {
+                                    if hog.is_some() || exclusive || bit_perfect {
+                                        if let Some(teardown) = normal_teardown.take() {
+                                            let _ = teardown.join();
+                                        }
+                                    }
+                                    if exclusive || bit_perfect {
+                                        Some(take_hog(&mut hog, device.as_deref())?)
+                                    } else {
+                                        // Restores the device for the system mixer.
+                                        hog = None;
+                                        None
+                                    }
+                                };
+
                                 let pipe = gst::Pipeline::new();
                                 watch_pipeline_sources(&pipe, route);
                                 // 2b: legacy `uridecodebin` per branch. `concat` does the
@@ -2453,6 +2482,12 @@ impl AudioPlayer {
                                 let audioconvert = gst::ElementFactory::make("audioconvert")
                                     .build()
                                     .map_err(|e| format!("Failed to create audioconvert: {e}"))?;
+                                if bit_perfect {
+                                    // Same as the ALSA bit-perfect chain. With equal
+                                    // formats audioconvert passes through anyway.
+                                    audioconvert.set_property_from_str("dithering", "none");
+                                    audioconvert.set_property_from_str("noise-shaping", "none");
+                                }
                                 let audioresample = gst::ElementFactory::make("audioresample")
                                     .build()
                                     .map_err(|e| format!("Failed to create audioresample: {e}"))?;
@@ -2464,9 +2499,24 @@ impl AudioPlayer {
                                     .property("volume", slider_to_amplitude(current_volume))
                                     .build()
                                     .map_err(|e| format!("Failed to create user volume: {e}"))?;
-                                let sink = gst::ElementFactory::make("autoaudiosink")
-                                    .build()
-                                    .map_err(|e| format!("Failed to create autoaudiosink: {e}"))?;
+                                let make_autoaudiosink = || {
+                                    gst::ElementFactory::make("autoaudiosink")
+                                        .build()
+                                        .map_err(|e| format!("Failed to create autoaudiosink: {e}"))
+                                };
+                                #[cfg(target_os = "macos")]
+                                let sink = match &exclusive_device {
+                                    Some(dev) => {
+                                        let id = dev.lock().unwrap().device_id();
+                                        gst::ElementFactory::make("osxaudiosink")
+                                            .property("device", id as i32)
+                                            .build()
+                                            .map_err(|e| format!("Failed to create osxaudiosink: {e}"))?
+                                    }
+                                    None => make_autoaudiosink()?,
+                                };
+                                #[cfg(not(target_os = "macos"))]
+                                let sink = make_autoaudiosink()?;
 
                                 pipe.add_many([
                                     &uridecodebin,
@@ -2598,6 +2648,20 @@ impl AudioPlayer {
                                         }
                                         gst::PadProbeReturn::Ok
                                     });
+                                }
+
+                                // Before the caps reach osxaudiosink, switch the hogged
+                                // device to the track's format. That probe also fills
+                                // output_cell with the device's physical format.
+                                #[cfg(target_os = "macos")]
+                                if let Some(dev) = &exclusive_device {
+                                    attach_hog_format_probe(
+                                        &audioconvert,
+                                        Arc::clone(dev),
+                                        bit_perfect,
+                                        Arc::clone(&output_cell_thread),
+                                        Arc::clone(&signal_path),
+                                    );
                                 }
 
                                 // autoaudiosink is a bin — its real child sink
@@ -2969,8 +3033,13 @@ impl AudioPlayer {
                                 }
                                 eos.store(false, Ordering::SeqCst);
                                 has_uri.store(false, Ordering::SeqCst);
+                                // Release the hogged device once nothing plays into it.
+                                #[cfg(target_os = "macos")]
+                                let held = hog.take();
                                 std::thread::spawn(move || {
                                     pipeline.set_state(gst::State::Null).ok();
+                                    #[cfg(target_os = "macos")]
+                                    drop(held);
                                 });
                                 *decoded_cell_thread.lock().unwrap() = None;
                                 *output_cell_thread.lock().unwrap() = None;
@@ -3693,7 +3762,7 @@ impl AudioPlayer {
                     }
 
                     AudioCommand::ListDevices { reply } => {
-                        let result = list_alsa_devices_inner();
+                        let result = list_output_devices();
                         reply.send(result).ok();
                     }
                 }
@@ -4254,10 +4323,7 @@ fn build_appsink_pipeline(
 
 /// Enumerate ALSA hardware devices. Does NOT use the audio pipeline,
 /// so it is safe to call from any thread.
-pub fn list_alsa_devices() -> Result<Vec<AudioDevice>, String> {
-    list_alsa_devices_inner()
-}
-
+#[cfg(not(target_os = "macos"))]
 fn list_alsa_devices_inner() -> Result<Vec<AudioDevice>, String> {
     gst::init().map_err(|e| format!("GStreamer init failed: {e}"))?;
     let monitor = gst::DeviceMonitor::new();
@@ -4327,7 +4393,153 @@ pub fn gapless_supported() -> bool {
 /// Exclusive and bit-perfect output drive an ALSA device directly, so they
 /// exist only on Linux.
 pub const fn exclusive_supported() -> bool {
-    cfg!(target_os = "linux")
+    cfg!(any(target_os = "linux", target_os = "macos"))
+}
+
+/// `SignalPath.backend` while exclusive output is on.
+const EXCLUSIVE_BACKEND: &str = if cfg!(target_os = "linux") {
+    "DirectAlsa"
+} else {
+    "CoreAudio"
+};
+
+/// Output devices for the exclusive-mode picker. `AudioDevice.id` is the ALSA
+/// device on Linux and the Core Audio device UID on macOS.
+pub fn list_output_devices() -> Result<Vec<AudioDevice>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        use crate::coreaudio_output::{default_output_uid, output_devices};
+        let mut devices: Vec<AudioDevice> = output_devices()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|d| AudioDevice { id: d.uid, name: d.name })
+            .collect();
+        // The picker preselects the first entry: make it the system output.
+        if let Ok(default_uid) = default_output_uid() {
+            devices.sort_by_key(|d| d.id != default_uid);
+        }
+        Ok(devices)
+    }
+    #[cfg(not(target_os = "macos"))]
+    list_alsa_devices_inner()
+}
+
+#[cfg(target_os = "macos")]
+type Hog = (String, Arc<Mutex<crate::coreaudio_output::ExclusiveDevice>>);
+
+/// Hold the exclusive-mode device in hog mode, reusing the hold across tracks.
+/// No device chosen means the system output device.
+#[cfg(target_os = "macos")]
+fn take_hog(
+    hog: &mut Option<Hog>,
+    device: Option<&str>,
+) -> Result<Arc<Mutex<crate::coreaudio_output::ExclusiveDevice>>, String> {
+    use crate::coreaudio_output::{default_output_uid, ExclusiveDevice, ExclusiveError};
+    let uid = match device {
+        Some(uid) => uid.to_string(),
+        None => default_output_uid().map_err(|e| e.to_string())?,
+    };
+    if let Some((held, dev)) = hog.as_ref() {
+        if *held == uid {
+            return Ok(Arc::clone(dev));
+        }
+    }
+    // Release the previous device before taking the new one.
+    *hog = None;
+    let dev = ExclusiveDevice::acquire(&uid).map_err(|e| match e {
+        // The frontend retries on this exact string.
+        ExclusiveError::Busy { .. } => "device_busy".to_string(),
+        other => other.to_string(),
+    })?;
+    let dev = Arc::new(Mutex::new(dev));
+    *hog = Some((uid, Arc::clone(&dev)));
+    Ok(dev)
+}
+
+/// Bit depth a decoded GStreamer format carries. Float comes from lossy
+/// decoders; 24 bits is the best a DAC can do with it.
+#[cfg(target_os = "macos")]
+fn pcm_bits(gst_format: &str) -> u32 {
+    match gst_format {
+        f if f.starts_with("S16") || f.starts_with("U16") => 16,
+        f if f.starts_with("S32") || f.starts_with("U32") => 32,
+        f if f.starts_with("S8") || f.starts_with("U8") => 8,
+        _ => 24,
+    }
+}
+
+/// On every caps event into `audioconvert`, switch the hogged device to the
+/// track's rate and depth before the caps reach `osxaudiosink`.
+///
+/// Without a matching device format: bit-perfect fails the track, like the
+/// ALSA path does; exclusive plays on and the signal path shows the resample
+/// that Core Audio then does.
+#[cfg(target_os = "macos")]
+fn attach_hog_format_probe(
+    audioconvert: &gst::Element,
+    dev: Arc<Mutex<crate::coreaudio_output::ExclusiveDevice>>,
+    bit_perfect: bool,
+    output_cell: Arc<Mutex<Option<crate::pipeline_probe::PadCaps>>>,
+    signal_path: Arc<SignalPathTracker>,
+) {
+    use crate::coreaudio_output::ExclusiveError;
+    let Some(pad) = audioconvert.static_pad("sink") else {
+        return;
+    };
+    pad.add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, move |pad, info| {
+        let Some(gst::PadProbeData::Event(ref event)) = info.data else {
+            return gst::PadProbeReturn::Ok;
+        };
+        let gst::EventView::Caps(caps_event) = event.view() else {
+            return gst::PadProbeReturn::Ok;
+        };
+        let Some(fmt) = parse_pcm_format(caps_event.caps()) else {
+            return gst::PadProbeReturn::Ok;
+        };
+        let bits = pcm_bits(&fmt.gst_format);
+        let mut dev = dev.lock().unwrap();
+        let output = match dev.apply_format(fmt.sample_rate, bits) {
+            Ok(physical) => {
+                signal_path.clear_resample();
+                Some((physical.label(), fmt.sample_rate))
+            }
+            Err(e @ ExclusiveError::UnsupportedFormat { .. }) if !bit_perfect => {
+                log::warn!("[audio]: {e}; Core Audio will convert");
+                let device_rate = dev.nominal_rate().map(|r| r.round() as u32).ok();
+                if let Some(rate) = device_rate {
+                    signal_path.record_resample(fmt.sample_rate, rate);
+                }
+                device_rate.map(|rate| (fmt.gst_format.clone(), rate))
+            }
+            Err(e) => {
+                let message = match e {
+                    ExclusiveError::UnsupportedFormat { sample_rate, .. } => format!(
+                        "DAC doesn't support {}kHz — turn off bit-perfect mode for compatibility",
+                        f64::from(sample_rate) / 1000.0
+                    ),
+                    other => other.to_string(),
+                };
+                log::error!("[audio]: exclusive output: {message}");
+                if let Some(element) = pad.parent_element() {
+                    let _ = element.post_message(gst::message::Error::new(
+                        gst::ResourceError::Settings,
+                        &message,
+                    ));
+                }
+                return gst::PadProbeReturn::Drop;
+            }
+        };
+        if let Some((format, rate)) = output {
+            if let Ok(mut cell) = output_cell.lock() {
+                *cell = Some(crate::pipeline_probe::PadCaps {
+                    format,
+                    rate,
+                    channels: fmt.channels,
+                });
+            }
+        }
+        gst::PadProbeReturn::Ok
+    });
 }
 
 #[cfg(test)]

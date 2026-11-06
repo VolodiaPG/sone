@@ -317,7 +317,7 @@ pub fn list_audio_devices(state: State<'_, AppState>) -> Result<Vec<AudioDevice>
     }
 
     // First call: probe directly (not via audio thread) and cache
-    let devices = crate::audio::list_alsa_devices().map_err(SoneError::Audio)?;
+    let devices = crate::audio::list_output_devices().map_err(SoneError::Audio)?;
     *state.cached_audio_devices.lock().unwrap() = Some(devices.clone());
     Ok(devices)
 }

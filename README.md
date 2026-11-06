@@ -370,9 +370,10 @@ brew install gstreamer pkg-config pnpm
 
 The Homebrew `gstreamer` formula includes the base, good, bad, ugly and libav plugins. SONE plays through `osxaudiosink`.
 
+Exclusive mode takes the output device in Core Audio hog mode. Hog mode means that no other app can play through the device. SONE then switches the device to the sample rate of each track. Bit-perfect mode also sets an integer device format with at least the track's bit depth, and turns off volume, normalization and dithering. If the device has no format at the track's sample rate, bit-perfect mode stops the track. Exclusive mode plays the track, and Core Audio converts the sample rate. When playback stops, SONE gives the device back with the format it had before.
+
 The macOS build has these limits:
 
-- Exclusive and bit-perfect modes are not available. They drive an ALSA device directly, and ALSA exists only on Linux.
 - There is no menu bar icon. If "minimize to tray" is on, closing the window hides it. Click the Dock icon to show it again.
 - The release `.app` links to the GStreamer libraries in `/opt/homebrew`. It runs only on a Mac that has the Homebrew `gstreamer` formula installed.
 

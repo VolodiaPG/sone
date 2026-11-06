@@ -172,13 +172,25 @@ export function conversionState(
   return rateChanged || narrowed ? "lossy" : "altered";
 }
 
+/** True for backends that own the output device exclusively (Linux direct ALSA, macOS Core Audio hog mode). */
+export function isExclusiveBackend(
+  backend: string | null | undefined,
+): boolean {
+  return backend === "DirectAlsa" || backend === "CoreAudio";
+}
+
+/** Human label for the signal-path backend. Linux labels are unchanged. */
+export function backendLabel(backend: string): string {
+  return backend === "CoreAudio" ? "Core Audio (hog mode)" : backend;
+}
+
 export function deriveAlterations(sp: SignalPath | null) {
   const userVol = sp?.userVolume ?? 1.0;
   const normFactor = sp?.normGainFactor ?? 1.0;
   const userVolAltered = Math.abs(userVol - 1.0) > EPS;
   const normAltered =
     !!sp?.volumeNormalization && Math.abs(normFactor - 1.0) > EPS;
-  const isDirectAlsa = sp?.backend === "DirectAlsa";
+  const isExclusiveOutput = isExclusiveBackend(sp?.backend);
 
   // "Pristine" means: every audio sample the decoder produced reaches the
   // DAC with all its bits intact. Empirical, not mode-based — a non-bit-
@@ -198,10 +210,10 @@ export function deriveAlterations(sp: SignalPath | null) {
   // What feeds the kernel? DirectAlsa: our pipeline's appsink output (we own
   // the ALSA device directly). Normal: the OS mixer's per-sink spec
   // (PipeWire/Pulse owns the device, our pipeline only hands off audio).
-  const upstreamFormat = isDirectAlsa
+  const upstreamFormat = isExclusiveOutput
     ? sp?.outputFormat
     : (sp?.osMixer?.sinkFormat ?? sp?.outputFormat);
-  const upstreamRate = isDirectAlsa
+  const upstreamRate = isExclusiveOutput
     ? sp?.outputRate
     : (sp?.osMixer?.sinkRate ?? sp?.outputRate);
 
@@ -230,7 +242,7 @@ export function deriveAlterations(sp: SignalPath | null) {
 
   const isPristine =
     !!sp &&
-    isDirectAlsa &&
+    isExclusiveOutput &&
     !!sp.exclusiveMode &&
     sp.resampledFrom == null &&
     sp.formatFallbackFrom == null &&
@@ -244,7 +256,7 @@ export function deriveAlterations(sp: SignalPath | null) {
     normFactor,
     userVolAltered,
     normAltered,
-    isDirectAlsa,
+    isExclusiveOutput,
     isPristine,
     lossyFormatChange,
     losslessPromotion,

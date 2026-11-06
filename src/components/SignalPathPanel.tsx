@@ -20,6 +20,7 @@ import {
   displayFormat,
   formatRate,
   gainFactorToDb,
+  backendLabel,
 } from "./signal-path/types";
 import { useSignalPathRefresh } from "../hooks/useSignalPathRefresh";
 import { useEscapeDismiss } from "../hooks/useEscapeDismiss";
@@ -68,7 +69,7 @@ export default function SignalPathPanel({
     normFactor,
     userVolAltered,
     normAltered,
-    isDirectAlsa,
+    isExclusiveOutput,
     isPristine,
     lossyFormatChange,
     losslessPromotion,
@@ -111,7 +112,7 @@ export default function SignalPathPanel({
     headline = `ReplayGain applied · ${gainFactorToDb(normFactor)}`;
   } else if (userVolAltered) {
     headline = `Volume slider scaling samples · ${amplitudeToSliderPercent(userVol)}%`;
-  } else if (sp?.osMixer && !isDirectAlsa) {
+  } else if (sp?.osMixer && !isExclusiveOutput) {
     headline = `Routed through ${sp.osMixer.server}`;
   } else if (sp && !sp.bitPerfect) {
     headline = "Bit-perfect mode off — pipeline at unity, not guaranteed";
@@ -223,7 +224,7 @@ export default function SignalPathPanel({
                   {(sp?.exclusiveMode ||
                     sp?.bitPerfect ||
                     sp?.backend ||
-                    (sp?.osMixer && !isDirectAlsa)) && (
+                    (sp?.osMixer && !isExclusiveOutput)) && (
                     <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10.5px] font-mono text-th-text-faint mb-6 uppercase tracking-wider">
                       {sp?.exclusiveMode && <span>exclusive</span>}
                       {sp?.bitPerfect && (
@@ -234,7 +235,7 @@ export default function SignalPathPanel({
                           <span>bit-perfect</span>
                         </>
                       )}
-                      {sp?.osMixer && !isDirectAlsa && (
+                      {sp?.osMixer && !isExclusiveOutput && (
                         <>
                           {(sp?.exclusiveMode || sp?.bitPerfect) && (
                             <span className="text-th-text-faint/40">·</span>
@@ -246,10 +247,10 @@ export default function SignalPathPanel({
                         <>
                           {(sp?.exclusiveMode ||
                             sp?.bitPerfect ||
-                            (sp?.osMixer && !isDirectAlsa)) && (
+                            (sp?.osMixer && !isExclusiveOutput)) && (
                             <span className="text-th-text-faint/40">·</span>
                           )}
-                          <span>{sp.backend}</span>
+                          <span>{backendLabel(sp.backend)}</span>
                         </>
                       )}
                     </div>
