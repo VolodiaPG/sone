@@ -105,7 +105,7 @@ export default function AboutModal({ open, onClose }: AboutModalProps) {
             </button>
           </div>
           <p className="mt-2 text-[12px] text-th-text-muted text-center">
-            Native Linux client for TIDAL
+            Native desktop client for TIDAL
           </p>
           <p className="mt-1 text-[11px] text-th-text-muted text-center">
             by Hassan Rabbi ·{" "}

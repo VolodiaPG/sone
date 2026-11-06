@@ -358,6 +358,28 @@ sudo pacman -S --needed gst-plugin-pipewire alsa-plugins
 
 </details>
 
+<details>
+<summary>macOS</summary>
+
+Install the Xcode command line tools and the Homebrew packages:
+
+```bash
+xcode-select --install
+brew install gstreamer pkg-config pnpm
+```
+
+The Homebrew `gstreamer` formula includes the base, good, bad, ugly and libav plugins. SONE plays through `osxaudiosink`.
+
+The macOS build has these limits:
+
+- Exclusive and bit-perfect modes are not available. They drive an ALSA device directly, and ALSA exists only on Linux.
+- There is no menu bar icon. If "minimize to tray" is on, closing the window hides it. Click the Dock icon to show it again.
+- The release `.app` links to the GStreamer libraries in `/opt/homebrew`. It runs only on a Mac that has the Homebrew `gstreamer` formula installed.
+
+Media keys, Control Center and AirPods controls work through the macOS Now Playing widget.
+
+</details>
+
 **Build and run:**
 
 ```bash
@@ -365,7 +387,7 @@ git clone https://github.com/lullabyX/sone.git
 cd sone
 pnpm install
 pnpm tauri dev             # Development mode
-pnpm tauri build           # Release build (produces .deb, .rpm, .AppImage)
+pnpm tauri build           # Release build (.deb, .rpm and .AppImage on Linux, .app and .dmg on macOS)
 ```
 
 **Using build scripts:**

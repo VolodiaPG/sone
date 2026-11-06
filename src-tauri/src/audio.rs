@@ -1,6 +1,7 @@
 use crate::signal_path::SignalPathTracker;
 use gst::prelude::*;
 use gstreamer as gst;
+#[cfg(target_os = "linux")]
 use gstreamer_app as gst_app;
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -257,7 +258,10 @@ pub struct AudioDevice {
 
 // ── PCM types ──────────────────────────────────────────────────────────
 
+// The ALSA writer types below are only built on Linux; elsewhere the
+// DirectAlsa backend is never constructed.
 /// Raw PCM chunk from GStreamer appsink
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 struct AudioChunk {
     data: Vec<u8>,
     format: PcmFormat,
@@ -337,6 +341,7 @@ enum AttachJob {
 }
 
 /// Commands to the ALSA writer thread
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 enum WriterCommand {
     Data(AudioChunk),
     EndOfTrack {
@@ -350,6 +355,7 @@ enum WriterCommand {
     Shutdown,
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const WRITER_SEND_POLL: std::time::Duration = std::time::Duration::from_millis(50);
 
 /// Hands a chunk to the writer, waiting while it is busy but giving up once
@@ -357,6 +363,7 @@ const WRITER_SEND_POLL: std::time::Duration = std::time::Duration::from_millis(5
 /// pipeline's state change forever behind a writer that is not reading (#233).
 /// Keyed on teardown, not the generation: a seek bumps the generation while
 /// the pipeline keeps running, and giving up there pauses the stream.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn send_chunk(
     tx: &crossbeam_channel::Sender<WriterCommand>,
     chunk: AudioChunk,
@@ -481,6 +488,7 @@ enum PlaybackBackend {
         norm_volume_el: Option<gst::Element>,
     },
     /// Exclusive/Bit-perfect: GStreamer decode → appsink, ALSA writer is external
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     DirectAlsa {
         pipeline: gst::Pipeline,
         user_volume_el: Option<gst::Element>,
@@ -2020,14 +2028,19 @@ impl AudioPlayer {
             // Writers that missed their shutdown deadline, kept so the next
             // open of the device can wait for them to let go of it.
             let mut lingering_writers: Vec<JoinHandle<()>> = Vec::new();
+            #[cfg_attr(not(target_os = "linux"), allow(unused_mut, unused_variables))]
             let mut writer_fmt: Option<PcmFormat> = None;
+            #[cfg_attr(not(target_os = "linux"), allow(unused_mut, unused_variables))]
             let mut writer_supported_fmts: Option<Vec<&'static str>> = None;
+            #[cfg_attr(not(target_os = "linux"), allow(unused_mut, unused_variables))]
             let mut writer_supported_rates: Option<Vec<u32>> = None;
+            #[cfg_attr(not(target_os = "linux"), allow(unused_mut, unused_variables))]
             let mut writer_device: Option<String> = None;
             // Track the mode the live writer was spawned in. `bit_perfect` is
             // baked into the writer thread at spawn (it drives reopen format
             // negotiation), so a same-device exclusive↔bit-perfect toggle must
             // force a respawn rather than reuse a stale-mode writer.
+            #[cfg_attr(not(target_os = "linux"), allow(unused_mut, unused_variables))]
             let mut writer_bit_perfect: Option<bool> = None;
             let frames_written = Arc::new(AtomicU64::new(0));
             let current_sample_rate = Arc::new(AtomicU32::new(48000));
@@ -4309,6 +4322,12 @@ fn list_alsa_devices_inner() -> Result<Vec<AudioDevice>, String> {
 /// coreelements, so this is effectively always true.
 pub fn gapless_supported() -> bool {
     gst::ElementFactory::find("concat").is_some()
+}
+
+/// Exclusive and bit-perfect output drive an ALSA device directly, so they
+/// exist only on Linux.
+pub const fn exclusive_supported() -> bool {
+    cfg!(target_os = "linux")
 }
 
 #[cfg(test)]

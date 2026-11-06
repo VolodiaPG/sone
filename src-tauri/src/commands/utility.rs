@@ -1,5 +1,5 @@
 use std::sync::atomic::Ordering;
-use tauri::{Manager, State};
+use tauri::State;
 
 use super::playback::compute_norm_gain;
 use crate::audio::AudioDevice;
@@ -42,10 +42,15 @@ pub fn refresh_signal_path(state: State<'_, AppState>) -> SignalPath {
 #[tauri::command]
 pub async fn update_tray_tooltip(app: tauri::AppHandle, text: String) -> Result<String, SoneError> {
     #[cfg(target_os = "linux")]
-    if let Some(tray_handle) = app.try_state::<crate::tray::TrayHandle>() {
-        tray_handle.inner().update_tooltip(text).await;
-        return Ok("updated".into());
+    {
+        use tauri::Manager;
+        if let Some(tray_handle) = app.try_state::<crate::tray::TrayHandle>() {
+            tray_handle.inner().update_tooltip(text).await;
+            return Ok("updated".into());
+        }
     }
+    #[cfg(not(target_os = "linux"))]
+    let _ = (app, text);
     Ok("tray not available".into())
 }
 
@@ -171,6 +176,11 @@ pub fn get_exclusive_mode(state: State<'_, AppState>) -> bool {
 
 #[tauri::command]
 pub fn set_exclusive_mode(state: State<'_, AppState>, enabled: bool) -> Result<(), SoneError> {
+    if enabled && !crate::audio::exclusive_supported() {
+        return Err(SoneError::Audio(
+            "Exclusive mode is not available on this OS".into(),
+        ));
+    }
     state.exclusive_mode.store(enabled, Ordering::Relaxed);
 
     if !enabled {
@@ -203,6 +213,11 @@ pub fn get_bit_perfect(state: State<'_, AppState>) -> bool {
 
 #[tauri::command]
 pub fn set_bit_perfect(state: State<'_, AppState>, enabled: bool) -> Result<(), SoneError> {
+    if enabled && !crate::audio::exclusive_supported() {
+        return Err(SoneError::Audio(
+            "Bit-perfect mode is not available on this OS".into(),
+        ));
+    }
     state.bit_perfect.store(enabled, Ordering::Relaxed);
 
     if enabled && !state.exclusive_mode.load(Ordering::Relaxed) {
@@ -236,6 +251,11 @@ pub fn get_gapless(state: State<'_, AppState>) -> bool {
 #[tauri::command]
 pub fn get_gapless_supported() -> bool {
     crate::audio::gapless_supported()
+}
+
+#[tauri::command]
+pub fn get_exclusive_supported() -> bool {
+    crate::audio::exclusive_supported()
 }
 
 #[tauri::command]

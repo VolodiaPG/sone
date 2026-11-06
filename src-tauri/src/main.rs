@@ -15,8 +15,7 @@ fn main() {
         //
         // TODO: revisit when WebKitGTK resolves the NVIDIA DMA-BUF bug
         // (upstream #262607 is WONTFIX as of 2026).
-        let already_overridden =
-            std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_some();
+        let already_overridden = std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_some();
 
         if !already_overridden {
             let nvidia_loaded = std::fs::read_to_string("/proc/modules")
@@ -40,7 +39,11 @@ fn main() {
                 std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
             }
         }
+    }
 
+    // Everything below concerns GStreamer and the proxy, which are the same on
+    // every OS.
+    {
         // Read once, used by both the bypass record and the scrub below, so
         // the two reason about the same sidecar structurally rather than
         // because two reads microseconds apart happened to agree.
@@ -111,6 +114,7 @@ fn main() {
         // the only sound place to mutate the environment, because glib/GTK
         // threads read it back via g_getenv once they exist. The audio worker
         // used to do it after spawning, which was unsound.
+        #[cfg(target_os = "linux")]
         {
             let plugin_path_1_0 = std::env::var("GST_PLUGIN_PATH_1_0").ok();
             let appdir = std::env::var("APPDIR").ok();
@@ -148,7 +152,6 @@ fn main() {
 /// environment: anything other than a recorded, enabled proxy leaves the
 /// variables exactly as the user's shell set them. A missing sidecar (first
 /// launch, or a write that failed) is *not* a default — it is "not proxying".
-#[cfg(target_os = "linux")]
 fn should_scrub_proxy_env(sidecar: Option<(bool, String)>) -> bool {
     matches!(sidecar, Some((true, _)))
 }
@@ -166,14 +169,13 @@ fn should_scrub_proxy_env(sidecar: Option<(bool, String)>) -> bool {
 /// `no_proxy` when the element is constructed and forwards it as
 /// `CURLOPT_NOPROXY`, which beats the `proxy` property, so a bypass list that
 /// survived startup silently sends audio out on the user's real address.
-#[cfg(target_os = "linux")]
 fn should_record_launch_bypass(present: bool, sidecar: Option<(bool, String)>) -> bool {
     present && !should_scrub_proxy_env(sidecar)
 }
 
 /// System GStreamer plugin directories, probed in order, and only when the
 /// process is not running from a bundle.
-#[cfg(target_os = "linux")]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const GST_PLUGIN_DIR_CANDIDATES: [&str; 3] = [
     "/usr/lib/x86_64-linux-gnu/gstreamer-1.0",
     "/usr/lib64/gstreamer-1.0",
@@ -197,7 +199,7 @@ const GST_PLUGIN_DIR_CANDIDATES: [&str; 3] = [
 ///    the host's system directories, so no probing happens.
 /// 3. Otherwise, probe the system directories, but only if `GST_PLUGIN_PATH` is
 ///    not already set.
-#[cfg(target_os = "linux")]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn gst_plugin_path_choice(
     plugin_path_1_0: Option<&str>,
     appdir: Option<&str>,
@@ -213,7 +215,7 @@ fn gst_plugin_path_choice(
     existing_dirs.first().map(|dir| dir.to_string())
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod tests {
     use super::{gst_plugin_path_choice, should_record_launch_bypass, should_scrub_proxy_env};
 

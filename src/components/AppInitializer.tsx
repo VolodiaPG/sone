@@ -48,6 +48,7 @@ import {
   preMuteVolumeAtom,
   exclusiveModeAtom,
   bitPerfectAtom,
+  exclusiveSupportedAtom,
   gaplessAtom,
   maxQualityAtom,
   exclusiveDeviceAtom,
@@ -322,6 +323,9 @@ export function AppInitializer() {
         // User name is fetched in the [isAuthenticated]-keyed preload effect
         // below so it re-populates on in-session re-login, not just startup.
 
+        invoke<boolean>("get_exclusive_supported")
+          .then((v) => store.set(exclusiveSupportedAtom, v))
+          .catch(() => {});
         // Exclusive mode settings (non-blocking, backend-authoritative)
         invoke<boolean>("get_exclusive_mode")
           .then((v) => store.set(exclusiveModeAtom, v))
@@ -1381,6 +1385,7 @@ export function AppInitializer() {
     },
     refreshData: () => void refreshApp(),
     toggleExclusive: () => {
+      if (!store.get(exclusiveSupportedAtom)) return;
       const isExclusive = store.get(exclusiveModeAtom);
       if (isExclusive) {
         store.set(exclusiveModeAtom, false);
@@ -1406,6 +1411,7 @@ export function AppInitializer() {
       }
     },
     toggleBitPerfect: () => {
+      if (!store.get(exclusiveSupportedAtom)) return;
       const isBP = store.get(bitPerfectAtom);
       if (isBP) {
         setBitPerfect(false);

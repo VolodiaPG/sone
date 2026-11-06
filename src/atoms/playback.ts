@@ -102,6 +102,8 @@ export const allowAiAtom = atomWithStorage("sone.allowAi.v1", true, undefined, {
 
 export const exclusiveModeAtom = atom(false);
 export const bitPerfectAtom = atom(false);
+/** Exclusive/bit-perfect output (direct ALSA) is Linux-only. Backend-authoritative. */
+export const exclusiveSupportedAtom = atom(false);
 
 /** Gapless playback kill-switch (Normal mode only). Default ON. */
 export const gaplessAtom = atom(true);

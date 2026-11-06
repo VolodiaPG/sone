@@ -1,3 +1,5 @@
+//! Linux media controls: an MPRIS server on the D-Bus session bus.
+
 use mpris_server::{LoopStatus, Metadata, PlaybackStatus, Player, Time, TrackId};
 use std::rc::Rc;
 use std::time::Duration;
@@ -5,49 +7,15 @@ use tauri::{Emitter, Manager};
 use tokio::sync::mpsc;
 use tokio::time::MissedTickBehavior;
 
-pub enum MprisCommand {
-    SetMetadata {
-        track_id: u64,
-        title: String,
-        artist: String,
-        album: String,
-        art_url: String,
-        duration_secs: f64,
-        url: Option<String>,
-        album_artist: Option<String>,
-        track_number: Option<u32>,
-        disc_number: Option<u32>,
-        content_created: Option<String>,
-        user_rating: Option<f64>,
-    },
-    SetPlaybackStatus {
-        is_playing: bool,
-    },
-    SetVolume {
-        volume: f64,
-    },
-    Seeked {
-        position_secs: f64,
-    },
-    SetShuffle {
-        enabled: bool,
-    },
-    SetLoopStatus {
-        mode: u8,
-    },
-    SetFullscreen {
-        fullscreen: bool,
-    },
-    Stop,
+use super::MediaCommand;
+
+pub struct MediaControls {
+    tx: mpsc::UnboundedSender<MediaCommand>,
 }
 
-pub struct MprisHandle {
-    tx: mpsc::UnboundedSender<MprisCommand>,
-}
-
-impl MprisHandle {
+impl MediaControls {
     pub fn new(app_handle: tauri::AppHandle) -> Self {
-        let (tx, mut rx) = mpsc::unbounded_channel::<MprisCommand>();
+        let (tx, mut rx) = mpsc::unbounded_channel::<MediaCommand>();
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
@@ -210,8 +178,7 @@ impl MprisHandle {
                         if player_for_tick.playback_status() != PlaybackStatus::Playing {
                             continue;
                         }
-                        let Some(state) = app_handle_for_tick.try_state::<crate::AppState>()
-                        else {
+                        let Some(state) = app_handle_for_tick.try_state::<crate::AppState>() else {
                             continue;
                         };
                         // Blocking pool: this runtime also serves D-Bus.
@@ -229,7 +196,7 @@ impl MprisHandle {
                 // Process commands from the main app
                 while let Some(cmd) = rx.recv().await {
                     match cmd {
-                        MprisCommand::SetMetadata {
+                        MediaCommand::SetMetadata {
                             track_id,
                             title,
                             artist,
@@ -244,8 +211,7 @@ impl MprisHandle {
                             user_rating,
                         } => {
                             let mut metadata = Metadata::new();
-                            let track_path =
-                                format!("/org/mpris/MediaPlayer2/Track/{}", track_id);
+                            let track_path = format!("/org/mpris/MediaPlayer2/Track/{}", track_id);
                             if let Ok(tid) = TrackId::try_from(track_path.as_str()) {
                                 metadata.set_trackid(Some(tid));
                             }
@@ -279,7 +245,7 @@ impl MprisHandle {
                             player.set_metadata(metadata).await.ok();
                             player.set_position(Time::ZERO);
                         }
-                        MprisCommand::SetPlaybackStatus { is_playing } => {
+                        MediaCommand::SetPlaybackStatus { is_playing } => {
                             let status = if is_playing {
                                 PlaybackStatus::Playing
                             } else {
@@ -287,18 +253,18 @@ impl MprisHandle {
                             };
                             player.set_playback_status(status).await.ok();
                         }
-                        MprisCommand::SetVolume { volume } => {
+                        MediaCommand::SetVolume { volume } => {
                             player.set_volume(volume).await.ok();
                         }
-                        MprisCommand::Seeked { position_secs } => {
+                        MediaCommand::Seeked { position_secs } => {
                             let time = Time::from_micros((position_secs * 1_000_000.0) as i64);
                             player.set_position(time);
                             player.seeked(time).await.ok();
                         }
-                        MprisCommand::SetShuffle { enabled } => {
+                        MediaCommand::SetShuffle { enabled } => {
                             player.set_shuffle(enabled).await.ok();
                         }
-                        MprisCommand::SetLoopStatus { mode } => {
+                        MediaCommand::SetLoopStatus { mode } => {
                             let status = match mode {
                                 1 => LoopStatus::Playlist,
                                 2 => LoopStatus::Track,
@@ -306,10 +272,10 @@ impl MprisHandle {
                             };
                             player.set_loop_status(status).await.ok();
                         }
-                        MprisCommand::SetFullscreen { fullscreen } => {
+                        MediaCommand::SetFullscreen { fullscreen } => {
                             player.set_fullscreen(fullscreen).await.ok();
                         }
-                        MprisCommand::Stop => {
+                        MediaCommand::Stop => {
                             player
                                 .set_playback_status(PlaybackStatus::Stopped)
                                 .await
@@ -323,7 +289,7 @@ impl MprisHandle {
         Self { tx }
     }
 
-    pub fn send(&self, cmd: MprisCommand) {
+    pub fn send(&self, cmd: MediaCommand) {
         self.tx.send(cmd).ok();
     }
 }

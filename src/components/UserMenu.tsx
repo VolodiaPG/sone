@@ -19,6 +19,7 @@ import { DISMISS_PRIORITY } from "../lib/dismissStack";
 import {
   exclusiveModeAtom,
   bitPerfectAtom,
+  exclusiveSupportedAtom,
   exclusiveDeviceAtom,
 } from "../atoms/playback";
 import { currentUserAvatarAtom } from "../atoms/auth";
@@ -58,6 +59,7 @@ export default function UserMenu() {
   const [reservedHint, setReservedHint] = useState(false);
   const [exclusiveMode, setExclusiveMode] = useAtom(exclusiveModeAtom);
   const bitPerfect = useAtomValue(bitPerfectAtom);
+  const exclusiveSupported = useAtomValue(exclusiveSupportedAtom);
   const [exclusiveDevice, setExclusiveDevice] = useAtom(exclusiveDeviceAtom);
   const { setBitPerfect } = usePlaybackActions();
   const [audioDevices, setAudioDevices] = useState<
@@ -133,7 +135,7 @@ export default function UserMenu() {
 
   // Load audio devices when exclusive mode is enabled
   useEffect(() => {
-    if (exclusiveMode) {
+    if (exclusiveSupported && exclusiveMode) {
       invoke<Array<{ id: string; name: string }>>("list_audio_devices")
         .then((devices) => {
           setAudioDevices(devices);
@@ -146,7 +148,7 @@ export default function UserMenu() {
         })
         .catch(() => {});
     }
-  }, [exclusiveMode]);
+  }, [exclusiveMode, exclusiveSupported]);
 
   // Close on click outside
   useEffect(() => {
@@ -228,31 +230,33 @@ export default function UserMenu() {
           {/* ── Exclusive output group ── */}
 
           {/* Exclusive output */}
-          <button
-            onClick={() => {
-              const next = !exclusiveMode;
-              setExclusiveMode(next);
-              if (!next && bitPerfect) {
-                // Disabling exclusive also disables bit-perfect; route through
-                // the action so volume/normalization restore to previous state.
-                setBitPerfect(false);
-              }
-              invoke("set_exclusive_mode", { enabled: next }).catch(() => {});
-              showToast(
-                next
-                  ? "Exclusive output on — takes effect next track"
-                  : "Exclusive output off — takes effect next track",
-              );
-            }}
-            className={menuItemClass}
-          >
-            <Headphones size={16} />
-            <span className="flex-1 text-left">Exclusive output</span>
-            <Toggle on={exclusiveMode} />
-          </button>
+          {exclusiveSupported && (
+            <button
+              onClick={() => {
+                const next = !exclusiveMode;
+                setExclusiveMode(next);
+                if (!next && bitPerfect) {
+                  // Disabling exclusive also disables bit-perfect; route through
+                  // the action so volume/normalization restore to previous state.
+                  setBitPerfect(false);
+                }
+                invoke("set_exclusive_mode", { enabled: next }).catch(() => {});
+                showToast(
+                  next
+                    ? "Exclusive output on — takes effect next track"
+                    : "Exclusive output off — takes effect next track",
+                );
+              }}
+              className={menuItemClass}
+            >
+              <Headphones size={16} />
+              <span className="flex-1 text-left">Exclusive output</span>
+              <Toggle on={exclusiveMode} />
+            </button>
+          )}
 
           {/* Device selector (visible when exclusive on) */}
-          {exclusiveMode && audioDevices.length > 0 && (
+          {exclusiveSupported && exclusiveMode && audioDevices.length > 0 && (
             <div className="px-4 py-1 relative">
               <div className="ml-7">
                 <button
@@ -296,7 +300,7 @@ export default function UserMenu() {
           )}
 
           {/* Bit-perfect mode (visible when exclusive on) */}
-          {exclusiveMode && (
+          {exclusiveSupported && exclusiveMode && (
             <button
               onClick={() => {
                 const next = !bitPerfect;

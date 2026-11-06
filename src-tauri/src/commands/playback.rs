@@ -327,8 +327,7 @@ pub async fn resume_track(state: State<'_, AppState>) -> Result<(), SoneError> {
 /// `stop_track` command and `logout`.
 pub(crate) async fn stop_playback(state: &AppState) -> Result<(), SoneError> {
     let result = state.audio_player.stop().map_err(SoneError::Audio);
-    #[cfg(target_os = "linux")]
-    state.mpris.send(crate::mpris::MprisCommand::Stop);
+    state.media_controls.send(crate::media_controls::MediaCommand::Stop);
     state.discord.send(crate::discord::DiscordCommand::Stop);
     state.tidal_reporter.on_track_stopped().await;
     state.scrobble_manager.on_track_stopped().await;
@@ -348,8 +347,7 @@ pub fn set_volume(state: State<'_, AppState>, level: f32) -> Result<(), SoneErro
         .set_volume(level)
         .map_err(SoneError::Audio)?;
 
-    #[cfg(target_os = "linux")]
-    state.mpris.send(crate::mpris::MprisCommand::SetVolume {
+    state.media_controls.send(crate::media_controls::MediaCommand::SetVolume {
         volume: level as f64,
     });
 
@@ -380,8 +378,7 @@ pub async fn seek_track(state: State<'_, AppState>, position_secs: f32) -> Resul
         .audio_player
         .seek(position_secs)
         .map_err(SoneError::Audio);
-    #[cfg(target_os = "linux")]
-    state.mpris.send(crate::mpris::MprisCommand::Seeked {
+    state.media_controls.send(crate::media_controls::MediaCommand::Seeked {
         position_secs: position_secs as f64,
     });
     state.discord.send(crate::discord::DiscordCommand::Seeked {
@@ -443,13 +440,11 @@ pub struct MprisMetadata {
 }
 
 #[tauri::command(rename_all = "camelCase")]
-#[allow(unused_variables)]
 pub fn update_mpris_metadata(
     state: State<'_, AppState>,
     metadata: MprisMetadata,
 ) -> Result<(), SoneError> {
-    #[cfg(target_os = "linux")]
-    state.mpris.send(crate::mpris::MprisCommand::SetMetadata {
+    state.media_controls.send(crate::media_controls::MediaCommand::SetMetadata {
         track_id: metadata.track_id,
         title: metadata.title.clone(),
         artist: metadata.artist.clone(),
@@ -482,16 +477,14 @@ pub fn update_mpris_metadata(
 }
 
 #[tauri::command(rename_all = "camelCase")]
-#[allow(unused_variables)]
 pub fn update_mpris_playback_status(
     state: State<'_, AppState>,
     is_playing: bool,
     position_secs: Option<f64>,
 ) -> Result<(), SoneError> {
-    #[cfg(target_os = "linux")]
     state
-        .mpris
-        .send(crate::mpris::MprisCommand::SetPlaybackStatus { is_playing });
+        .media_controls
+        .send(crate::media_controls::MediaCommand::SetPlaybackStatus { is_playing });
     state
         .discord
         .send(crate::discord::DiscordCommand::SetPlaying {
@@ -502,41 +495,35 @@ pub fn update_mpris_playback_status(
 }
 
 #[tauri::command]
-#[allow(unused_variables)]
 pub fn update_mpris_shuffle(
     state: State<'_, AppState>,
     enabled: bool,
 ) -> Result<(), SoneError> {
-    #[cfg(target_os = "linux")]
     state
-        .mpris
-        .send(crate::mpris::MprisCommand::SetShuffle { enabled });
+        .media_controls
+        .send(crate::media_controls::MediaCommand::SetShuffle { enabled });
     Ok(())
 }
 
 #[tauri::command]
-#[allow(unused_variables)]
 pub fn update_mpris_fullscreen(
     state: State<'_, AppState>,
     fullscreen: bool,
 ) -> Result<(), SoneError> {
-    #[cfg(target_os = "linux")]
     state
-        .mpris
-        .send(crate::mpris::MprisCommand::SetFullscreen { fullscreen });
+        .media_controls
+        .send(crate::media_controls::MediaCommand::SetFullscreen { fullscreen });
     Ok(())
 }
 
 #[tauri::command]
-#[allow(unused_variables)]
 pub fn update_mpris_loop_status(
     state: State<'_, AppState>,
     mode: u8,
 ) -> Result<(), SoneError> {
-    #[cfg(target_os = "linux")]
     state
-        .mpris
-        .send(crate::mpris::MprisCommand::SetLoopStatus { mode });
+        .media_controls
+        .send(crate::media_controls::MediaCommand::SetLoopStatus { mode });
     Ok(())
 }
 

@@ -10,8 +10,7 @@ mod embedded_librefm;
 mod error;
 mod idle_inhibit;
 pub mod logging;
-#[cfg(target_os = "linux")]
-mod mpris;
+mod media_controls;
 mod rate_gate;
 mod scrobble;
 mod signal_path;
@@ -40,7 +39,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Listener, Manager};
+#[cfg(target_os = "linux")]
 use tauri_plugin_deep_link::DeepLinkExt;
+#[cfg(target_os = "linux")]
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
 use tidal_api::{AuthTokens, TidalClient};
 use tokio::sync::Mutex;
@@ -257,8 +258,7 @@ pub struct AppState {
     /// Current track's selected peak amplitude (linear) stored as f64 bits. NAN = no data.
     /// Album or track peak depending on playback context.
     pub last_peak_amplitude: AtomicU64,
-    #[cfg(target_os = "linux")]
-    pub mpris: mpris::MprisHandle,
+    pub media_controls: media_controls::MediaControls,
     pub scrobble_manager: scrobble::ScrobbleManager,
     pub tidal_reporter: tidal_report::TidalReporter,
     pub discord: discord::DiscordHandle,
@@ -407,8 +407,12 @@ impl AppState {
             .as_ref()
             .map(|s| s.volume_normalization)
             .unwrap_or(false);
-        let exclusive_mode = saved.as_ref().map(|s| s.exclusive_mode).unwrap_or(false);
-        let bit_perfect = saved.as_ref().map(|s| s.bit_perfect).unwrap_or(false);
+        // A saved exclusive/bit-perfect choice means nothing where the mode
+        // does not exist; ignore it instead of failing every play.
+        let exclusive_mode = crate::audio::exclusive_supported()
+            && saved.as_ref().map(|s| s.exclusive_mode).unwrap_or(false);
+        let bit_perfect = crate::audio::exclusive_supported()
+            && saved.as_ref().map(|s| s.bit_perfect).unwrap_or(false);
         let gapless = saved.as_ref().map(|s| s.gapless).unwrap_or(true);
         let exclusive_device = saved.as_ref().and_then(|s| s.exclusive_device.clone());
         let max_quality = saved
@@ -518,8 +522,7 @@ impl AppState {
             cached_audio_devices: std::sync::Mutex::new(None),
             last_replay_gain: AtomicU64::new(f64::NAN.to_bits()),
             last_peak_amplitude: AtomicU64::new(f64::NAN.to_bits()),
-            #[cfg(target_os = "linux")]
-            mpris: mpris::MprisHandle::new(app_handle),
+            media_controls: media_controls::MediaControls::new(app_handle),
             scrobble_manager,
             tidal_reporter,
             discord: discord_handle,
@@ -890,7 +893,10 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             tray::setup(app);
 
-            // Global media key shortcuts (non-fatal)
+            // Global media key shortcuts (non-fatal). Linux only: on macOS the
+            // media keys reach MPRemoteCommandCenter (see media_controls), and
+            // grabbing them here needs the Accessibility permission.
+            #[cfg(target_os = "linux")]
             if let Err(e) = app.handle().plugin(
                 tauri_plugin_global_shortcut::Builder::new()
                     .with_handler(move |app, shortcut, event| {
@@ -1128,6 +1134,7 @@ pub fn run() {
             commands::utility::set_bit_perfect,
             commands::utility::get_gapless,
             commands::utility::get_gapless_supported,
+            commands::utility::get_exclusive_supported,
             commands::utility::set_gapless,
             commands::utility::get_max_quality,
             commands::utility::set_max_quality,
@@ -1169,6 +1176,16 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
+            // Dock icon click while the main window is hidden (closed with
+            // minimize-to-tray on): macOS has no tray to bring it back.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }
             if let tauri::RunEvent::Exit = event {
                 let state = app.state::<AppState>();
                 state.discord.send(crate::discord::DiscordCommand::Disconnect);

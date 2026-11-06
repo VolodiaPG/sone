@@ -289,6 +289,9 @@ pub fn spawn_theme_watcher(app: tauri::AppHandle) {
             return;
         }
     };
+    // FSEvents (macOS) reports resolved paths, so a config dir reached
+    // through a symlink would never match `event_touches`.
+    let dir = dir.canonicalize().unwrap_or(dir);
     let path = dir.join("theme.json");
 
     let handler = {
@@ -546,7 +549,9 @@ mod tests {
         use std::time::Duration;
 
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("theme.json");
+        // Resolved like `spawn_theme_watcher` does: the macOS temp dir sits
+        // behind the /var -> /private/var symlink.
+        let path = dir.path().canonicalize().unwrap().join("theme.json");
 
         let (tx, rx) = mpsc::channel();
         let mut debouncer = new_debouncer(

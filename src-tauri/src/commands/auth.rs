@@ -468,11 +468,12 @@ pub async fn logout(state: State<'_, AppState>) -> Result<(), SoneError> {
 /// purges them) and does NOT lock `tidal_client` (callers hold that lock).
 pub(crate) async fn restore_session_services(app: &AppHandle) {
     let state = app.state::<AppState>();
-    let discord_rpc = state.load_settings().map(|s| s.discord_rpc).unwrap_or(false);
+    let discord_rpc = state
+        .load_settings()
+        .map(|s| s.discord_rpc)
+        .unwrap_or(false);
     if discord_rpc {
-        state
-            .discord
-            .send(crate::discord::DiscordCommand::Connect);
+        state.discord.send(crate::discord::DiscordCommand::Connect);
     }
     crate::mcp::ensure_mcp_started(app).await;
 }
@@ -687,6 +688,17 @@ pub async fn start_pkce_login_window(app: AppHandle) -> Result<(), SoneError> {
                 e
             )));
         }
+    }
+
+    // No webview setup to do before the page loads; WKWebView asks the user
+    // before it grants camera or microphone access.
+    #[cfg(not(target_os = "linux"))]
+    if let Err(e) = window.navigate(url) {
+        let _ = window.close();
+        return Err(SoneError::NotConfigured(format!(
+            "Failed to open login page: {}",
+            e
+        )));
     }
 
     Ok(())
