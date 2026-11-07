@@ -1,10 +1,22 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useAtom } from "jotai";
-import { themeAtom } from "../../atoms/theme";
-import { PRESET_THEMES, deriveTheme, type Theme } from "../../lib/theme";
+import { useAtom, useAtomValue } from "jotai";
+import {
+  themeAtom,
+  autoThemeAtom,
+  systemAppearanceAtom,
+} from "../../atoms/theme";
+import {
+  PRESET_THEMES,
+  DEFAULT_AUTO_THEME,
+  deriveTheme,
+  type Appearance,
+  type Theme,
+} from "../../lib/theme";
 import { Check, RotateCcw } from "lucide-react";
 import ColorPicker from "./ColorPicker";
 import ThemeMiniPreview from "./ThemeMiniPreview";
+import Toggle from "../Toggle";
+import SettingRow from "./SettingRow";
 
 const SECTION_LABEL =
   "text-[10.5px] font-bold tracking-[1.4px] uppercase text-th-text-faint mb-3";
@@ -13,11 +25,30 @@ type PickerTarget = "accent" | "bg";
 
 export default function ThemesTab() {
   const [theme, setTheme] = useAtom(themeAtom);
-  const [localAccent, setLocalAccent] = useState(theme.accent);
-  const [localBg, setLocalBg] = useState(theme.bgBase);
+  const [auto, setAuto] = useAtom(autoThemeAtom);
+  const systemAppearance = useAtomValue(systemAppearanceAtom);
+  const [editing, setEditing] = useState<Appearance>(systemAppearance);
+
+  // Follow the OS when it changes
+  useEffect(() => {
+    setEditing(systemAppearance);
+  }, [systemAppearance]);
+
+  // Theme the rest of this tab edits
+  const edited = auto.enabled ? auto[editing] : theme;
+  const setEdited = useCallback(
+    (t: Theme) => {
+      if (auto.enabled) setAuto((a) => ({ ...a, [editing]: t }));
+      else setTheme(t);
+    },
+    [auto.enabled, editing, setAuto, setTheme],
+  );
+
+  const [localAccent, setLocalAccent] = useState(edited.accent);
+  const [localBg, setLocalBg] = useState(edited.bgBase);
   const [activePreset, setActivePreset] = useState<string | null>(
     PRESET_THEMES.find(
-      (p) => p.accent === theme.accent && p.bgBase === theme.bgBase,
+      (p) => p.accent === edited.accent && p.bgBase === edited.bgBase,
     )?.name ?? null,
   );
 
@@ -32,16 +63,16 @@ export default function ThemesTab() {
   const bgSwatchRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  // Sync local state when theme atom changes externally
+  // Sync local state when the edited theme changes externally
   useEffect(() => {
-    setLocalAccent(theme.accent);
-    setLocalBg(theme.bgBase);
+    setLocalAccent(edited.accent);
+    setLocalBg(edited.bgBase);
     setActivePreset(
       PRESET_THEMES.find(
-        (p) => p.accent === theme.accent && p.bgBase === theme.bgBase,
+        (p) => p.accent === edited.accent && p.bgBase === edited.bgBase,
       )?.name ?? null,
     );
-  }, [theme]);
+  }, [edited]);
 
   // Close popover on outside click
   useEffect(() => {
@@ -60,16 +91,16 @@ export default function ThemesTab() {
   // Apply live preview as user edits
   const applyPreview = useCallback(
     (accent: string, bgBase: string) => {
-      setTheme({ name: "Custom", accent, bgBase });
+      setEdited({ name: "Custom", accent, bgBase });
     },
-    [setTheme],
+    [setEdited],
   );
 
   const handlePresetClick = (preset: Theme) => {
     setLocalAccent(preset.accent);
     setLocalBg(preset.bgBase);
     setActivePreset(preset.name);
-    setTheme(preset);
+    setEdited(preset);
   };
 
   const handleAccentChange = (hex: string) => {
@@ -85,11 +116,13 @@ export default function ThemesTab() {
   };
 
   const handleReset = () => {
-    const defaultTheme = PRESET_THEMES[0];
+    const defaultTheme = auto.enabled
+      ? DEFAULT_AUTO_THEME[editing]
+      : PRESET_THEMES[0];
     setLocalAccent(defaultTheme.accent);
     setLocalBg(defaultTheme.bgBase);
     setActivePreset(defaultTheme.name);
-    setTheme(defaultTheme);
+    setEdited(defaultTheme);
   };
 
   const togglePicker = (
@@ -112,8 +145,70 @@ export default function ThemesTab() {
     setPicker(target);
   };
 
+  const toggleAuto = () => {
+    if (auto.enabled) {
+      setAuto((a) => ({ ...a, enabled: false }));
+    } else {
+      // Keep the active theme: store it in the slot for the current appearance
+      setAuto((a) => ({ ...a, enabled: true, [systemAppearance]: theme }));
+    }
+  };
+
   return (
     <div>
+      {/* Appearance */}
+      <section className="mb-[30px]">
+        <h3 className={SECTION_LABEL}>Appearance</h3>
+        <div className="rounded-[14px] bg-th-surface border border-th-border-subtle overflow-hidden">
+          <SettingRow
+            title="Match system appearance"
+            subtitle="Use a light theme in light mode and a dark theme in dark mode."
+          >
+            <button
+              type="button"
+              role="switch"
+              aria-checked={auto.enabled}
+              aria-label="Match system appearance"
+              onClick={toggleAuto}
+              className="cursor-pointer"
+            >
+              <Toggle on={auto.enabled} />
+            </button>
+          </SettingRow>
+        </div>
+        {auto.enabled && (
+          <div
+            className="mt-3 inline-flex rounded-[10px] bg-th-inset border border-th-border-subtle p-0.5"
+            role="group"
+            aria-label="Theme to edit"
+          >
+            {(["light", "dark"] as const).map((a) => {
+              const selected = editing === a;
+              return (
+                <button
+                  key={a}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setEditing(a)}
+                  className={`cursor-pointer rounded-[8px] px-3.5 py-1.5 text-[12.5px] font-semibold transition-colors ${
+                    selected
+                      ? "bg-th-accent text-th-on-accent"
+                      : "text-th-text-secondary hover:text-th-text-primary"
+                  }`}
+                >
+                  {a === "light" ? "Light" : "Dark"}
+                  {systemAppearance === a && (
+                    <span className="ml-1.5 text-[11px] font-normal opacity-70">
+                      (current)
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
       {/* Presets */}
       <section>
         <h3 className={SECTION_LABEL}>Presets</h3>

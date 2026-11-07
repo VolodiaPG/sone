@@ -331,6 +331,27 @@ export interface ThemeFile {
 }
 
 export const THEME_STORAGE_KEY = "sone.theme.v1";
+export const AUTO_THEME_STORAGE_KEY = "sone.theme.auto.v1";
+
+/** One theme per OS appearance, applied while `enabled` is true. */
+export interface AutoTheme {
+  enabled: boolean;
+  light: Theme;
+  dark: Theme;
+}
+
+export type Appearance = "light" | "dark";
+
+export const DEFAULT_AUTO_THEME: AutoTheme = {
+  enabled: false,
+  light: PRESET_THEMES.find((p) => p.name === "Daylight")!,
+  dark: PRESET_THEMES[0],
+};
+
+/** True when the background is light, so the theme suits light mode. */
+export function isLightTheme(theme: Theme): boolean {
+  return hexToHsl(theme.bgBase)[2] >= 50;
+}
 
 /** The `"preset"` meaning "use the `custom` colors". Mirrors `CUSTOM_PRESET`
  *  in `src-tauri/src/theme_config.rs`. */
@@ -412,4 +433,11 @@ export function isTheme(value: unknown): value is Theme {
     normalizeHex(t.accent) !== null &&
     normalizeHex(t.bgBase) !== null
   );
+}
+
+/** True when `value` is a usable AutoTheme. */
+export function isAutoTheme(value: unknown): value is AutoTheme {
+  if (!value || typeof value !== "object") return false;
+  const t = value as Partial<AutoTheme>;
+  return typeof t.enabled === "boolean" && isTheme(t.light) && isTheme(t.dark);
 }

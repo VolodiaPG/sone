@@ -1,12 +1,18 @@
+import { atom } from "jotai";
 import {
   atomWithStorage,
   createJSONStorage,
   unstable_withStorageValidator,
 } from "jotai/utils";
 import {
+  type Appearance,
+  type AutoTheme,
   type Theme,
+  AUTO_THEME_STORAGE_KEY,
+  DEFAULT_AUTO_THEME,
   PRESET_THEMES,
   THEME_STORAGE_KEY,
+  isAutoTheme,
   isTheme,
 } from "../lib/theme";
 
@@ -23,3 +29,32 @@ export const themeAtom = atomWithStorage<Theme>(
   themeStorage,
   { getOnInit: true },
 );
+
+const autoThemeStorage =
+  unstable_withStorageValidator(isAutoTheme)(createJSONStorage<unknown>());
+
+/** The light and dark themes used when the theme follows the OS. */
+export const autoThemeAtom = atomWithStorage<AutoTheme>(
+  AUTO_THEME_STORAGE_KEY,
+  DEFAULT_AUTO_THEME,
+  autoThemeStorage,
+  { getOnInit: true },
+);
+
+const DARK_QUERY = "(prefers-color-scheme: dark)";
+
+function readAppearance(): Appearance {
+  return window.matchMedia?.(DARK_QUERY).matches ? "dark" : "light";
+}
+
+/** The current OS appearance. Tracks changes while mounted. */
+export const systemAppearanceAtom = atom<Appearance>(readAppearance());
+
+systemAppearanceAtom.onMount = (set) => {
+  const mq = window.matchMedia?.(DARK_QUERY);
+  if (!mq) return;
+  const update = () => set(mq.matches ? "dark" : "light");
+  update();
+  mq.addEventListener("change", update);
+  return () => mq.removeEventListener("change", update);
+};

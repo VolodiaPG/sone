@@ -1,4 +1,5 @@
 import { atomWithStorage } from "jotai/utils";
+import { isMac } from "./platform";
 
 export const ACTION_IDS = [
   "playPause",
@@ -17,6 +18,7 @@ export const ACTION_IDS = [
   "zoomReset",
   "toggleExclusive",
   "toggleBitPerfect",
+  "openSettings",
   "toggleShortcuts",
   "closeWindow",
   "quitApp",
@@ -123,6 +125,12 @@ export const ACTION_REGISTRY: readonly ActionMeta[] = [
     id: "toggleBitPerfect",
     label: "Toggle bit-perfect mode",
     default: c("KeyB", { mod: true }),
+    repeatable: false,
+  },
+  {
+    id: "openSettings",
+    label: "Open settings",
+    default: c("Comma", { mod: true }),
     repeatable: false,
   },
   {
@@ -417,6 +425,15 @@ function codeDisplay(code: string): string {
 
 export function formatCombo(combo: KeyCombo | null): string {
   if (!combo) return "—";
+  // macOS order and glyphs: Option, Shift, Command, then the key.
+  if (isMac) {
+    return [
+      combo.alt ? "⌥" : "",
+      combo.shift ? "⇧" : "",
+      combo.mod ? "⌘" : "",
+      codeDisplay(combo.code),
+    ].join("");
+  }
   const parts: string[] = [];
   if (combo.mod) parts.push("Ctrl");
   if (combo.alt) parts.push("Alt");

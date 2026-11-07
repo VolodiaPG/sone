@@ -1,5 +1,7 @@
 import ReactDOM from "react-dom/client";
+import { getDefaultStore } from "jotai";
 import App from "./App";
+import { installAutoTheme } from "./lib/autoTheme";
 import { bootstrapThemeFile } from "./lib/themeFile";
 import { trackWindowFocus } from "./lib/windowFocus";
 
@@ -20,6 +22,8 @@ async function main() {
     bootstrapThemeFile().catch(() => {}),
     new Promise<void>((resolve) => setTimeout(resolve, 2000)),
   ]);
+  // After the file bootstrap, so the OS appearance decides the first frame.
+  installAutoTheme(getDefaultStore());
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <App />,
   );

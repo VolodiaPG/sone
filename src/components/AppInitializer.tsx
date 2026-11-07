@@ -109,6 +109,7 @@ import {
   getFeed,
 } from "../api/tidal";
 import { pickProfileAvatarHref } from "./ProfilePage";
+import { OPEN_SETTINGS_EVENT } from "./ProxyNoticeBanner";
 
 import type {
   AuthTokens,
@@ -1435,6 +1436,9 @@ export function AppInitializer() {
         setBitPerfect(true);
         showToast("Bit-perfect on — takes effect next track");
       }
+    },
+    openSettings: () => {
+      window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_EVENT));
     },
     toggleShortcuts: () => {
       window.dispatchEvent(new CustomEvent("toggle-shortcuts"));

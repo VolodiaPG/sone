@@ -5,6 +5,7 @@ import { decorationsAtom, hideTitleBarAtom } from "../../atoms/ui";
 import { useToast } from "../../contexts/ToastContext";
 import Toggle from "../Toggle";
 import SettingRow from "./SettingRow";
+import { isMac } from "../../lib/platform";
 
 type TitleBarMode = "system" | "custom" | "hidden";
 
@@ -73,58 +74,67 @@ export default function GeneralTab() {
 
   return (
     <div>
-      <p className="text-[10.5px] font-bold tracking-[1.4px] uppercase text-th-text-faint mb-2.5">
-        Title bar
-      </p>
-      <div className="rounded-[14px] bg-th-surface border border-th-border-subtle overflow-hidden">
-        {TITLE_BAR_MODES.map((m) => {
-          const sel = mode === m.id;
-          return (
-            <button
-              key={m.id}
-              onClick={() => setMode(m.id)}
-              style={
-                sel
-                  ? {
-                      background:
-                        "linear-gradient(90deg, color-mix(in srgb, var(--th-accent) 11%, transparent), transparent 72%)",
-                    }
-                  : undefined
-              }
-              className="relative w-full flex items-center gap-4 px-5 py-2.5 text-left border-t border-th-border-subtle first:border-t-0 transition-colors hover:bg-th-hl-faint"
-            >
-              {sel && (
-                <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-th-accent" />
-              )}
-              <span
-                className={`w-[18px] h-[18px] shrink-0 rounded-full border-2 flex items-center justify-center ${
-                  sel ? "border-th-accent" : "border-th-text-faint"
-                }`}
-              >
-                <span
-                  className={`w-2 h-2 rounded-full bg-th-accent transition-transform ${
-                    sel ? "scale-100" : "scale-0"
-                  }`}
-                />
-              </span>
-              <span className="flex-1 min-w-0">
-                <span
-                  className={`block text-[13.5px] font-bold ${
-                    sel ? "text-th-accent" : "text-th-text-primary"
-                  }`}
+      {/* macOS always uses the native traffic lights over the SONE bar. */}
+      {!isMac && (
+        <>
+          <p className="text-[10.5px] font-bold tracking-[1.4px] uppercase text-th-text-faint mb-2.5">
+            Title bar
+          </p>
+          <div className="rounded-[14px] bg-th-surface border border-th-border-subtle overflow-hidden">
+            {TITLE_BAR_MODES.map((m) => {
+              const sel = mode === m.id;
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => setMode(m.id)}
+                  style={
+                    sel
+                      ? {
+                          background:
+                            "linear-gradient(90deg, color-mix(in srgb, var(--th-accent) 11%, transparent), transparent 72%)",
+                        }
+                      : undefined
+                  }
+                  className="relative w-full flex items-center gap-4 px-5 py-2.5 text-left border-t border-th-border-subtle first:border-t-0 transition-colors hover:bg-th-hl-faint"
                 >
-                  {m.label}
-                </span>
-                <span className="block text-[11.5px] text-th-text-muted mt-0.5">
-                  {m.spec}
-                </span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
+                  {sel && (
+                    <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-th-accent" />
+                  )}
+                  <span
+                    className={`w-[18px] h-[18px] shrink-0 rounded-full border-2 flex items-center justify-center ${
+                      sel ? "border-th-accent" : "border-th-text-faint"
+                    }`}
+                  >
+                    <span
+                      className={`w-2 h-2 rounded-full bg-th-accent transition-transform ${
+                        sel ? "scale-100" : "scale-0"
+                      }`}
+                    />
+                  </span>
+                  <span className="flex-1 min-w-0">
+                    <span
+                      className={`block text-[13.5px] font-bold ${
+                        sel ? "text-th-accent" : "text-th-text-primary"
+                      }`}
+                    >
+                      {m.label}
+                    </span>
+                    <span className="block text-[11.5px] text-th-text-muted mt-0.5">
+                      {m.spec}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
 
-      <p className="text-[10.5px] font-bold tracking-[1.4px] uppercase text-th-text-faint mt-6 mb-1">
+      <p
+        className={`text-[10.5px] font-bold tracking-[1.4px] uppercase text-th-text-faint mb-1 ${
+          isMac ? "" : "mt-6"
+        }`}
+      >
         Window
       </p>
       <div className="rounded-[14px] bg-th-surface border border-th-border-subtle overflow-hidden divide-y divide-th-border-subtle">

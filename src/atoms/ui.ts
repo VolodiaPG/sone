@@ -1,5 +1,6 @@
 import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
+import { isMac } from "../lib/platform";
 
 export const drawerOpenAtom = atom(false);
 export const drawerTabAtom = atom<string>("queue");
@@ -18,7 +19,13 @@ export const decorationsAtom = atom<boolean>(false);
 
 // `true` = hide title bar entirely (no SONE bar, no system bar). Overrides
 // `decorationsAtom` when on. Frontend-only preference (localStorage).
-export const hideTitleBarAtom = atomWithStorage("sone.hideTitleBar.v1", false);
+// Always `false` on macOS: the window keeps its traffic lights there, and
+// without the SONE bar they would sit on top of the content.
+const hideTitleBarStoredAtom = atomWithStorage("sone.hideTitleBar.v1", false);
+export const hideTitleBarAtom = atom(
+  (get) => !isMac && get(hideTitleBarStoredAtom),
+  (_get, set, next: boolean) => set(hideTitleBarStoredAtom, next),
+);
 
 // `true` = play animated album covers (Tidal videoCover mp4s) on the large
 // now-playing art; falls back to static art when off or unavailable. Default ON.

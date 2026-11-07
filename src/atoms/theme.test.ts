@@ -1,6 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createStore } from "jotai";
-import { THEME_STORAGE_KEY, PRESET_THEMES, isTheme } from "../lib/theme";
+import {
+  THEME_STORAGE_KEY,
+  AUTO_THEME_STORAGE_KEY,
+  DEFAULT_AUTO_THEME,
+  PRESET_THEMES,
+  isTheme,
+  isAutoTheme,
+  isLightTheme,
+} from "../lib/theme";
 
 const OCEAN = { name: "Ocean", accent: "#3B82F6", bgBase: "#0E1118" };
 
@@ -60,5 +68,45 @@ describe("isTheme", () => {
     expect(isTheme({})).toBe(false);
     expect(isTheme({ name: "x", accent: "#3B82F6" })).toBe(false);
     expect(isTheme({ name: "x", accent: "zz", bgBase: "#000000" })).toBe(false);
+  });
+});
+
+describe("isAutoTheme", () => {
+  const light = DEFAULT_AUTO_THEME.light;
+  const dark = DEFAULT_AUTO_THEME.dark;
+
+  it("accepts the default", () => {
+    expect(isAutoTheme(DEFAULT_AUTO_THEME)).toBe(true);
+  });
+
+  it("rejects malformed values", () => {
+    expect(isAutoTheme(null)).toBe(false);
+    expect(isAutoTheme({})).toBe(false);
+    expect(isAutoTheme({ light, dark })).toBe(false);
+    expect(isAutoTheme({ enabled: "yes", light, dark })).toBe(false);
+    expect(isAutoTheme({ enabled: true, light, dark: { name: "x" } })).toBe(
+      false,
+    );
+    expect(isAutoTheme({ enabled: true, light: null, dark })).toBe(false);
+    expect(isAutoTheme({ enabled: true, light })).toBe(false);
+  });
+});
+
+describe("autoThemeAtom getOnInit contract", () => {
+  it("falls back to the default for junk in storage", async () => {
+    for (const junk of ["null", "42", "{}", '{"enabled":true}', "not json"]) {
+      localStorage.setItem(AUTO_THEME_STORAGE_KEY, junk);
+      vi.resetModules();
+      const { autoThemeAtom } = await import("./theme");
+      expect(createStore().get(autoThemeAtom)).toEqual(DEFAULT_AUTO_THEME);
+    }
+  });
+});
+
+describe("isLightTheme", () => {
+  it("is true for Daylight and false for Violet Night", () => {
+    const get = (n: string) => PRESET_THEMES.find((p) => p.name === n)!;
+    expect(isLightTheme(get("Daylight"))).toBe(true);
+    expect(isLightTheme(get("Violet Night"))).toBe(false);
   });
 });

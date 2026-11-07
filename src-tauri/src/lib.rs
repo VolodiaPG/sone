@@ -404,7 +404,11 @@ impl AppState {
         }
 
         let minimize_to_tray = saved.as_ref().map(|s| s.minimize_to_tray).unwrap_or(false);
-        let decorations = saved.as_ref().map(|s| s.decorations).unwrap_or(false);
+        // macOS always keeps the native traffic lights over the custom title
+        // bar (see tauri.macos.conf.json), so the native-chrome choice does
+        // not apply there.
+        let decorations = cfg!(not(target_os = "macos"))
+            && saved.as_ref().map(|s| s.decorations).unwrap_or(false);
         let volume_normalization = saved
             .as_ref()
             .map(|s| s.volume_normalization)

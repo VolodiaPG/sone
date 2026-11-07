@@ -1,38 +1,50 @@
 import { useEffect, useState, useCallback } from "react";
 import { Minus, X, Square, Copy } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { isMac } from "../lib/platform";
 
 export const TITLEBAR_HEIGHT = 32;
 
-function useWindowControls() {
-  const [isMaximized, setIsMaximized] = useState(false);
+// Room for the native traffic lights. tauri.macos.conf.json places them.
+const TRAFFIC_LIGHTS_WIDTH = 80;
+
+function useWindowFocus() {
   const [isFocused, setIsFocused] = useState(true);
 
   useEffect(() => {
     const win = getCurrentWindow();
-
-    win
-      .isMaximized()
-      .then(setIsMaximized)
-      .catch(() => {});
     win
       .isFocused()
       .then(setIsFocused)
       .catch(() => {});
+    const unlisten = win.onFocusChanged(({ payload }) => {
+      setIsFocused(payload);
+    });
+    return () => {
+      unlisten.then((fn) => fn()).catch(() => {});
+    };
+  }, []);
 
-    const unlistenResize = win.onResized(() => {
+  return isFocused;
+}
+
+function useWindowControls() {
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  useEffect(() => {
+    const win = getCurrentWindow();
+    win
+      .isMaximized()
+      .then(setIsMaximized)
+      .catch(() => {});
+    const unlisten = win.onResized(() => {
       win
         .isMaximized()
         .then(setIsMaximized)
         .catch(() => {});
     });
-    const unlistenFocus = win.onFocusChanged(({ payload }) => {
-      setIsFocused(payload);
-    });
-
     return () => {
-      unlistenResize.then((fn) => fn()).catch(() => {});
-      unlistenFocus.then((fn) => fn()).catch(() => {});
+      unlisten.then((fn) => fn()).catch(() => {});
     };
   }, []);
 
@@ -62,18 +74,81 @@ function useWindowControls() {
       .catch(() => {});
   }, []);
 
-  return { isMaximized, isFocused, minimize, toggleMaximize, close };
+  return { isMaximized, minimize, toggleMaximize, close };
 }
 
-export default function TitleBar() {
-  const { isMaximized, isFocused, minimize, toggleMaximize, close } =
-    useWindowControls();
+function Wordmark({ isFocused }: { isFocused: boolean }) {
+  return (
+    <>
+      <img
+        src="/sone-icon.png"
+        alt=""
+        width={16}
+        height={16}
+        draggable={false}
+        className={`pointer-events-none transition-opacity ${
+          isFocused ? "opacity-100" : "opacity-50"
+        }`}
+      />
+      <span
+        className={`pointer-events-none text-[11px] font-semibold tracking-wider text-th-text-primary transition-opacity ${
+          isFocused ? "opacity-100" : "opacity-50"
+        }`}
+      >
+        SONE
+      </span>
+      <span
+        className={`w-1.5 h-1.5 rounded-full bg-th-accent shrink-0 pointer-events-none transition-opacity ${
+          isFocused ? "opacity-100" : "opacity-50"
+        }`}
+      />
+    </>
+  );
+}
+
+const BAR_CLASS =
+  "flex items-center bg-th-surface border-b border-th-border-subtle select-none shrink-0";
+
+// macOS: the native traffic lights sit on the left of this strip, and the
+// wordmark is centered like a native window title.
+function MacTitleBar() {
+  const isFocused = useWindowFocus();
+
+  return (
+    <div
+      data-tauri-drag-region
+      className={BAR_CLASS}
+      style={{ height: TITLEBAR_HEIGHT }}
+    >
+      <div
+        data-tauri-drag-region
+        className="h-full shrink-0"
+        style={{ width: TRAFFIC_LIGHTS_WIDTH }}
+      />
+      <div
+        data-tauri-drag-region
+        className="flex-1 flex items-center justify-center gap-2 h-full"
+      >
+        <Wordmark isFocused={isFocused} />
+      </div>
+      <div
+        data-tauri-drag-region
+        className="h-full shrink-0"
+        style={{ width: TRAFFIC_LIGHTS_WIDTH }}
+      />
+    </div>
+  );
+}
+
+function DefaultTitleBar() {
+  const isFocused = useWindowFocus();
+  const { isMaximized, minimize, toggleMaximize, close } = useWindowControls();
 
   // Double-click maximize is handled by Tauri's drag-region script
   return (
     <div
       data-tauri-drag-region
-      className="flex items-center justify-between bg-th-surface border-b border-th-border-subtle select-none shrink-0"
+      className={`${BAR_CLASS} justify-between`}
       style={{ height: TITLEBAR_HEIGHT }}
     >
       {/* Left zone: app icon + wordmark + accent indicator (also draggable) */}
@@ -81,28 +156,7 @@ export default function TitleBar() {
         data-tauri-drag-region
         className="flex items-center gap-2 pl-3 pr-4 h-full"
       >
-        <img
-          src="/sone-icon.png"
-          alt=""
-          width={16}
-          height={16}
-          draggable={false}
-          className={`pointer-events-none transition-opacity ${
-            isFocused ? "opacity-100" : "opacity-50"
-          }`}
-        />
-        <span
-          className={`pointer-events-none text-[11px] font-semibold tracking-wider text-th-text-primary transition-opacity ${
-            isFocused ? "opacity-100" : "opacity-50"
-          }`}
-        >
-          SONE
-        </span>
-        <span
-          className={`w-1.5 h-1.5 rounded-full bg-th-accent shrink-0 pointer-events-none transition-opacity ${
-            isFocused ? "opacity-100" : "opacity-50"
-          }`}
-        />
+        <Wordmark isFocused={isFocused} />
       </div>
 
       {/* Middle zone (flex grows to fill — draggable) */}
@@ -138,4 +192,8 @@ export default function TitleBar() {
       </div>
     </div>
   );
+}
+
+export default function TitleBar() {
+  return isMac ? <MacTitleBar /> : <DefaultTitleBar />;
 }
