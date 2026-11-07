@@ -10,6 +10,9 @@ permissions:
 
 jobs:
   update-flathub:
+    # Only upstream has the FLATHUB_TOKEN secret and the right to open PRs on
+    # the Flathub repo. Forks skip this job.
+    if: github.repository == 'lullabyX/sone'
     runs-on: ubuntu-latest
     steps:
       - name: Extract tag and commit
