@@ -1,0 +1,119 @@
+name: Release macOS
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and upload, for example v0.24.0'
+        required: true
+        type: string
+
+# Read-only by default. Only the release job below gets write access.
+permissions:
+  contents: read
+
+# One run per tag. A second run waits instead of cancelling a build that
+# may be halfway through uploading.
+concurrency:
+  group: release-macos-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish DMG
+    # Apple Silicon runner. The DMG is built for arm64 only.
+    runs-on: macos-15
+    timeout-minutes: 60
+    # The only job that can write to the repo. It creates the release and
+    # uploads the DMG.
+    permissions:
+      contents: write
+    env:
+      # Passed through env so the value never goes into a script as text.
+      TAG_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      # Runs before checkout so a bad tag name never reaches git.
+      - name: Validate tag
+        id: meta
+        run: |
+          TAG="$TAG_INPUT"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Invalid tag format: $TAG"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ steps.meta.outputs.tag }}
+          persist-credentials: false
+
+      # A tag that does not match the app version would ship a DMG with the
+      # wrong name and the wrong version inside.
+      - name: Check tag matches app version
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          CONF_VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
+          if [[ "$CONF_VERSION" != "$VERSION" ]]; then
+            echo "::error::Tag $TAG does not match version $CONF_VERSION in src-tauri/tauri.conf.json"
+            exit 1
+          fi
+
+      # The Homebrew formula ships the base, good, bad, ugly and libav plugins.
+      - name: Install system dependencies
+        run: brew install gstreamer pkg-config
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch @ 2026-09-03
+        with:
+          toolchain: stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri
+          # Tag runs only read the cache. Master builds in ci.yml fill it.
+          save-if: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      # The app is NOT code-signed or notarized. It links to the Homebrew
+      # GStreamer, so it runs only on a Mac that has `brew install gstreamer`.
+      - name: Build app and DMG
+        run: ./build-scripts/build/macos.sh
+
+      - name: Publish to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          DMG="dist/macos/SONE_${VERSION}_aarch64.dmg"
+          if [[ ! -f "$DMG" ]]; then
+            echo "::error::Expected DMG not found: $DMG"
+            ls -l dist/macos
+            exit 1
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" "$DMG" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "$DMG" \
+              --verify-tag \
+              --generate-notes \
+              --title "$TAG" \
+              --repo "$GITHUB_REPOSITORY"
+          fi

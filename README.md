@@ -1,10 +1,10 @@
 <div align="center">
   <img src="sone.png" alt="SONE" width="150">
   <h1>SONE</h1>
-<p>The native desktop client for <a href="https://tidal.com">TIDAL</a> on Linux. Lossless streaming with bit-perfect ALSA output up to 24-bit/192kHz (MAX) — your DAC, not your browser's resampler.</p>
+<p>The native desktop client for <a href="https://tidal.com">TIDAL</a> on Linux and macOS. Lossless streaming with bit-perfect output up to 24-bit/192kHz (MAX) — your DAC, not your browser's resampler.</p>
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
-[![Platform: Linux](https://img.shields.io/badge/Platform-Linux-yellow.svg)]()
+[![Platform: Linux and macOS](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-yellow.svg)]()
 [![Built with Tauri 2](https://img.shields.io/badge/Built_with-Tauri_2-orange.svg)](https://v2.tauri.app/)
 
   <div align="center">
@@ -34,7 +34,7 @@ The Linux desktop app TIDAL never built.
 
 SONE finally gives Linux users a first-class streaming client. It delivers the complete, fully-featured experience you expect with seamless library management and a sleek, familiar workflow—and then supercharges it.
 
-We went beyond the basics with direct-to-DAC bit-perfect ALSA output, a resizable-adaptive floating miniplayer, music video playback, custom themes, Discord Rich Presence, and multi-service scrobbling (Last.fm, Libre.fm, ListenBrainz)—all wrapped in a fast, native Linux app.
+We went beyond the basics with direct-to-DAC bit-perfect ALSA output, a resizable-adaptive floating miniplayer, music video playback, custom themes, Discord Rich Presence, and multi-service scrobbling (Last.fm, Libre.fm, ListenBrainz)—all wrapped in a fast, native app for Linux and macOS.
 
 <details>
 <summary>Table of Contents</summary>
@@ -131,6 +131,46 @@ flatpak run io.github.lullabyX.sone
 <a href="https://flathub.org/apps/io.github.lullabyX.sone">
   <img width="200" alt="Download on Flathub" src="https://flathub.org/api/badge?locale=en"/>
 </a>
+
+### macOS
+
+The macOS version is newer than the Linux version and has less testing. The release build is for Apple Silicon only.
+
+1. Install [Homebrew](https://brew.sh).
+2. Install GStreamer. SONE needs it to play audio.
+
+   ```bash
+   brew install gstreamer
+   ```
+
+3. Download `SONE_<version>_aarch64.dmg` from the [GitHub Releases](https://github.com/VolodiaPG/sone/releases) page. The first macOS release is v0.24.0.
+4. Open the `.dmg` file and drag `SONE.app` to the `Applications` folder.
+5. Clear the quarantine flag. The app is not code-signed or notarized, so macOS blocks it at first launch.
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/SONE.app
+   ```
+
+6. Open `SONE.app`.
+
+If you prefer not to use the terminal, open `SONE.app` once and close the warning. Then open System Settings, go to Privacy & Security, and click Open Anyway.
+
+If you have an Intel Mac, build SONE from source. See [Building from source](#building-from-source).
+
+What works on macOS, and what differs from Linux:
+
+| Feature | macOS |
+| --- | --- |
+| Playback | GStreamer with `osxaudiosink` |
+| Media keys, Control Center, AirPods controls | Work through the macOS Now Playing widget, in place of MPRIS |
+| Exclusive and bit-perfect output | Work through Core Audio hog mode, in place of ALSA |
+| Global media-key shortcuts | Not registered. The Now Playing widget receives the media keys |
+| System tray | Not available. Click the Dock icon to show a hidden window |
+| Window title bar | Native macOS traffic lights. The native-chrome setting does not apply |
+| Keyboard shortcuts | Use the Command key in place of Ctrl |
+| Theme | Auto theme can follow the light or dark appearance of macOS |
+| Sleep prevention | IOKit display-sleep assertion |
+| Credential storage | macOS Keychain |
 
 ### OS Packages
 
@@ -529,6 +569,13 @@ Yes. SONE is a client for TIDAL and requires an active paid TIDAL subscription. 
 <summary>Which Linux distributions are supported?</summary>
 
 Any modern Linux distribution. SONE is on Flathub (works everywhere), and ships native packages for Debian/Ubuntu (`.deb`), Fedora and openSUSE (`.rpm`), and Arch Linux (AUR).
+
+</details>
+
+<details>
+<summary>Does SONE run on macOS?</summary>
+
+Yes, on Apple Silicon. Download the `.dmg` file from the [Releases](https://github.com/VolodiaPG/sone/releases) page. Install GStreamer with `brew install gstreamer` first. See [macOS](#macos) for the full steps.
 
 </details>
 
