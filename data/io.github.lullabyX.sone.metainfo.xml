@@ -161,7 +161,7 @@
   <content_rating type="oars-1.1" />
 
   <releases>
-    <release version="0.24.0" date="2026-11-07">
+    <release version="0.23.0" date="2026-11-01">
       <description>
         <p>AI Content</p>
         <ul>

@@ -4,8 +4,10 @@ use semver::Version;
 use serde::Serialize;
 use tauri::State;
 
+// The fork's releases: their versions continue after upstream's, and they
+// hold the macOS builds.
 const GITHUB_LATEST_RELEASE_URL: &str =
-    "https://api.github.com/repos/lullabyX/sone/releases/latest";
+    "https://api.github.com/repos/VolodiaPG/sone/releases/latest";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

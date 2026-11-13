@@ -1,106 +1,152 @@
 name: Release macOS
 
+# Every master commit that passes CI and changes the app becomes a release:
+# the DMG goes to a new GitHub release and the Homebrew cask in
+# VolodiaPG/homebrew-tap moves to it.
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
+  # Release the current master now, even when only non-app files changed.
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Existing tag to build and upload, for example v0.24.0'
-        required: true
-        type: string
 
 # Read-only by default. Only the release job below gets write access.
 permissions:
   contents: read
 
-# One run per tag. A second run waits instead of cancelling a build that
-# may be halfway through uploading.
+# Releases run one at a time, so two runs never pick the same version.
 concurrency:
-  group: release-macos-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  group: release-macos
   cancel-in-progress: false
 
 jobs:
   release:
     name: Build and publish DMG
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
     # Apple Silicon runner. The DMG is built for arm64 only.
     runs-on: macos-15
     timeout-minutes: 60
-    # The only job that can write to the repo. It creates the release and
-    # uploads the DMG.
     permissions:
       contents: write
     env:
-      # Passed through env so the value never goes into a script as text.
-      TAG_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      FORCE: ${{ github.event_name == 'workflow_dispatch' }}
     steps:
-      # Runs before checkout so a bad tag name never reaches git.
-      - name: Validate tag
-        id: meta
-        run: |
-          TAG="$TAG_INPUT"
-          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
-            echo "::error::Invalid tag format: $TAG"
-            exit 1
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout tag
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ steps.meta.outputs.tag }}
+          ref: ${{ env.SHA }}
+          # The full history and tags, to find the last release.
+          fetch-depth: 0
           persist-credentials: false
 
-      # A tag that does not match the app version would ship a DMG with the
-      # wrong name and the wrong version inside.
-      - name: Check tag matches app version
+      # The version files follow upstream, so that upstream version bumps
+      # merge without conflicts. The fork release version is the upstream
+      # version when the fork has not released it yet. Otherwise it is the
+      # next patch after the last fork release.
+      - name: Pick version
+        id: version
         env:
-          TAG: ${{ steps.meta.outputs.tag }}
-          VERSION: ${{ steps.meta.outputs.version }}
+          TAP_TOKEN_SET: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
         run: |
-          CONF_VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
-          if [[ "$CONF_VERSION" != "$VERSION" ]]; then
-            echo "::error::Tag $TAG does not match version $CONF_VERSION in src-tauri/tauri.conf.json"
+          # Fail before the release exists, not after it, so a rerun works.
+          if [[ "$TAP_TOKEN_SET" != "true" ]]; then
+            echo "::error::Set the HOMEBREW_TAP_TOKEN secret to update the Homebrew cask."
             exit 1
           fi
+          git fetch --quiet origin master
+          if [[ "$(git rev-parse origin/master)" != "$SHA" ]]; then
+            echo "::notice::$SHA is no longer the tip of master. A newer run releases it."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git tag --points-at HEAD | grep -q '^v'; then
+            echo "::notice::$SHA already has a release tag."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          LAST_TAG=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
+          if [[ -n "$LAST_TAG" && "$FORCE" != "true" ]] && git diff --quiet "$LAST_TAG" HEAD -- \
+              src src-tauri public index.html miniplayer.html package.json pnpm-lock.yaml \
+              vite.config.ts tsconfig.json tailwind.config.js postcss.config.js \
+              build-scripts/build/macos.sh; then
+            echo "::notice::No app changes since $LAST_TAG."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BASE=$(jq -r '.version' src-tauri/tauri.conf.json)
+          VERSION=$(python3 - "$BASE" "${LAST_TAG#v}" <<'EOF'
+          import sys
+          base, last = sys.argv[1], sys.argv[2]
+          b = tuple(int(x) for x in base.split("-")[0].split("."))
+          if not last:
+              print(base)
+          else:
+              l = tuple(int(x) for x in last.split("."))
+              print(base if b > l else f"{l[0]}.{l[1]}.{l[2] + 1}")
+          EOF
+          )
+          echo "Upstream version $BASE, last release ${LAST_TAG:-none}, new release v$VERSION"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       # The Homebrew formula ships the base, good, bad, ugly and libav plugins.
       - name: Install system dependencies
+        if: steps.version.outputs.skip == 'false'
         run: brew install gstreamer pkg-config
 
       - name: Set up Rust
+        if: steps.version.outputs.skip == 'false'
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch @ 2026-09-03
         with:
           toolchain: stable
 
       - name: Cache cargo build
+        if: steps.version.outputs.skip == 'false'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri
-          # Tag runs only read the cache. Master builds in ci.yml fill it.
+          # Release runs only read the cache. Master builds in ci.yml fill it.
           save-if: false
 
       - name: Set up pnpm
+        if: steps.version.outputs.skip == 'false'
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - name: Set up Node
+        if: steps.version.outputs.skip == 'false'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: pnpm
 
+      # Only in this build. The commit keeps the upstream version.
+      - name: Set app version
+        if: steps.version.outputs.skip == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          npm pkg set version="$VERSION"
+          node sync-version.mjs
+
       # The app is NOT code-signed or notarized. It links to the Homebrew
       # GStreamer, so it runs only on a Mac that has `brew install gstreamer`.
       - name: Build app and DMG
+        if: steps.version.outputs.skip == 'false'
         run: ./build-scripts/build/macos.sh
 
-      - name: Publish to GitHub release
+      - name: Publish GitHub release
+        id: publish
+        if: steps.version.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.meta.outputs.tag }}
-          VERSION: ${{ steps.meta.outputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           DMG="dist/macos/SONE_${VERSION}_aarch64.dmg"
           if [[ ! -f "$DMG" ]]; then
@@ -108,12 +154,39 @@ jobs:
             ls -l dist/macos
             exit 1
           fi
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$TAG" "$DMG" --clobber --repo "$GITHUB_REPOSITORY"
-          else
-            gh release create "$TAG" "$DMG" \
-              --verify-tag \
-              --generate-notes \
-              --title "$TAG" \
-              --repo "$GITHUB_REPOSITORY"
-          fi
+          # A tag made with GITHUB_TOKEN starts no other workflow.
+          gh release create "v$VERSION" "$DMG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SHA" \
+            --title "v$VERSION" \
+            --generate-notes
+          echo "sha256=$(shasum -a 256 "$DMG" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      # HOMEBREW_TAP_TOKEN: a fine-grained token with Contents write access
+      # on VolodiaPG/homebrew-tap.
+      - name: Checkout Homebrew tap
+        if: steps.version.outputs.skip == 'false'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: VolodiaPG/homebrew-tap
+          ref: main
+          path: homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Update Homebrew cask
+        if: steps.version.outputs.skip == 'false'
+        working-directory: homebrew-tap
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA256: ${{ steps.publish.outputs.sha256 }}
+        run: |
+          sed -i '' -E \
+            -e "s/^  version \"[^\"]+\"/  version \"$VERSION\"/" \
+            -e "s/^  sha256 \"[^\"]+\"/  sha256 \"$SHA256\"/" \
+            Casks/sone.rb
+          grep -q "version \"$VERSION\"" Casks/sone.rb
+          grep -q "sha256 \"$SHA256\"" Casks/sone.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "sone $VERSION"
+          git push origin HEAD:main
