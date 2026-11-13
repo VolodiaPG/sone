@@ -6,6 +6,7 @@ import { useToast } from "../../contexts/ToastContext";
 import Toggle from "../Toggle";
 import SettingRow from "./SettingRow";
 import { isMac } from "../../lib/platform";
+import RenderingSection from "./RenderingSection";
 
 type TitleBarMode = "system" | "custom" | "hidden";
 
@@ -153,6 +154,9 @@ export default function GeneralTab() {
           </button>
         </SettingRow>
       </div>
+
+      {/* The render mode picks a WebKitGTK renderer. macOS uses WKWebView. */}
+      {!isMac && <RenderingSection />}
     </div>
   );
 }
