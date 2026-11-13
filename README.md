@@ -136,6 +136,16 @@ flatpak run io.github.lullabyX.sone
 
 The macOS version is newer than the Linux version and has less testing. The release build is for Apple Silicon only.
 
+If you have [Homebrew](https://brew.sh), install SONE from the `volodiapg/tap` tap. The cask installs GStreamer and clears the quarantine flag for you.
+
+```bash
+brew install --cask volodiapg/tap/sone
+```
+
+If Homebrew refuses to load the cask from an untrusted tap, run `brew trust volodiapg/tap` and install again.
+
+To install SONE by hand, do these steps:
+
 1. Install [Homebrew](https://brew.sh).
 2. Install GStreamer. SONE needs it to play audio.
 
@@ -575,7 +585,7 @@ Any modern Linux distribution. SONE is on Flathub (works everywhere), and ships 
 <details>
 <summary>Does SONE run on macOS?</summary>
 
-Yes, on Apple Silicon. Download the `.dmg` file from the [Releases](https://github.com/VolodiaPG/sone/releases) page. Install GStreamer with `brew install gstreamer` first. See [macOS](#macos) for the full steps.
+Yes, on Apple Silicon. Run `brew install --cask volodiapg/tap/sone`, or download the `.dmg` file from the [Releases](https://github.com/VolodiaPG/sone/releases) page. See [macOS](#macos) for the full steps.
 
 </details>
 
