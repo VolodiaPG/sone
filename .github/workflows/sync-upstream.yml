@@ -1,0 +1,62 @@
+name: Sync upstream
+
+on:
+  schedule:
+    # Every day at 04:17 UTC.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    name: Merge lullabyX/sone master
+    # The upstream repo has nothing to sync from.
+    if: github.repository != 'lullabyX/sone'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # GITHUB_TOKEN cannot push a merge that changes files in
+      # .github/workflows, and its pushes do not start the CI workflow.
+      # Set the UPSTREAM_SYNC_TOKEN secret (a fine-grained token with
+      # Contents and Workflows write access on this repo) to fix both.
+      - name: Checkout master
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          fetch-depth: 0
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
+
+      - name: Merge upstream master
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/lullabyX/sone.git
+          git fetch --no-tags upstream master
+
+          if git merge-base --is-ancestor upstream/master HEAD; then
+            echo "Already up to date with upstream." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          COUNT=$(git rev-list --count HEAD..upstream/master)
+          if ! git merge --no-edit -m "Merge upstream lullabyX/sone master" upstream/master; then
+            {
+              echo "## Merge conflict"
+              echo ""
+              echo "Merge $COUNT upstream commits by hand. Conflicting files:"
+              echo ""
+              git diff --name-only --diff-filter=U | sed 's/^/- `/; s/$/`/'
+            } >> "$GITHUB_STEP_SUMMARY"
+            git merge --abort
+            echo "::error::Upstream master does not merge cleanly into master."
+            exit 1
+          fi
+
+          git push origin HEAD:master
+          echo "Merged $COUNT upstream commits." >> "$GITHUB_STEP_SUMMARY"
