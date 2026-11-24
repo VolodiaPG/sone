@@ -4,6 +4,7 @@ import {
   THEME_STORAGE_KEY,
   AUTO_THEME_STORAGE_KEY,
   DEFAULT_AUTO_THEME,
+  DEFAULT_THEME,
   PRESET_THEMES,
   isTheme,
   isAutoTheme,
@@ -32,7 +33,7 @@ describe("themeAtom getOnInit contract", () => {
 
   it("falls back to the default preset when nothing is stored", async () => {
     const store = createStore();
-    expect(store.get(await freshThemeAtom())).toEqual(PRESET_THEMES[0]);
+    expect(store.get(await freshThemeAtom())).toEqual(DEFAULT_THEME);
   });
 
   // Each of these is valid JSON, so without a validator it would reach the
@@ -49,7 +50,7 @@ describe("themeAtom getOnInit contract", () => {
     it(`falls back to the default preset for stored ${junk}`, async () => {
       localStorage.setItem(THEME_STORAGE_KEY, junk);
       const store = createStore();
-      expect(store.get(await freshThemeAtom())).toEqual(PRESET_THEMES[0]);
+      expect(store.get(await freshThemeAtom())).toEqual(DEFAULT_THEME);
     });
   }
 });

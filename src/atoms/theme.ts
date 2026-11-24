@@ -10,7 +10,7 @@ import {
   type Theme,
   AUTO_THEME_STORAGE_KEY,
   DEFAULT_AUTO_THEME,
-  PRESET_THEMES,
+  DEFAULT_THEME,
   THEME_STORAGE_KEY,
   isAutoTheme,
   isTheme,
@@ -25,7 +25,7 @@ const themeStorage =
 
 export const themeAtom = atomWithStorage<Theme>(
   THEME_STORAGE_KEY,
-  PRESET_THEMES[0],
+  DEFAULT_THEME,
   themeStorage,
   { getOnInit: true },
 );

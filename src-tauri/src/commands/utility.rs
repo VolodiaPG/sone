@@ -71,7 +71,8 @@ pub async fn get_image_bytes(
                 .proxied_http
                 .client()
                 .map_err(|e| SoneError::ProxyBlocked { reason: e.cause })?;
-            let res = http_client.get(&url).send().await?;
+            // A missing size (403) must fail, not be cached as the image.
+            let res = http_client.get(&url).send().await?.error_for_status()?;
             let bytes = res.bytes().await?.to_vec();
 
             state
@@ -101,6 +102,19 @@ pub async fn clear_disk_cache(state: State<'_, AppState>) -> Result<(), SoneErro
     log::info!("[clear_disk_cache]: user-initiated cache clear");
     state.disk_cache.clear().await;
     Ok(())
+}
+
+/// Whether these command-line arguments ask for the TV interface (`--tv`).
+pub fn args_request_tv_mode<S: AsRef<str>>(args: impl IntoIterator<Item = S>) -> bool {
+    args.into_iter().any(|a| a.as_ref() == "--tv")
+}
+
+/// `true` when SONE was launched with `--tv` or `SONE_TV_MODE=1`, so a media
+/// PC can autostart straight into the TV interface.
+#[tauri::command]
+pub fn get_launch_tv_mode() -> bool {
+    args_request_tv_mode(std::env::args().skip(1))
+        || std::env::var("SONE_TV_MODE").is_ok_and(|v| v == "1")
 }
 
 #[tauri::command]
@@ -650,18 +664,22 @@ pub async fn set_proxy_settings(
     outcome
 }
 
+/// Applies what the frontend wants held: `sleep` keeps the computer awake,
+/// `screen` keeps the display on. `seq` orders calls that land out of order.
 #[tauri::command]
-pub async fn inhibit_idle(
+pub async fn set_idle_inhibit(
     window: tauri::WebviewWindow,
     state: State<'_, AppState>,
+    sleep: bool,
+    screen: bool,
+    seq: u64,
 ) -> Result<(), SoneError> {
-    state.idle_inhibitor.lock().await.inhibit(&window).await;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn uninhibit_idle(state: State<'_, AppState>) -> Result<(), SoneError> {
-    state.idle_inhibitor.lock().await.uninhibit().await;
+    state
+        .idle_inhibitor
+        .lock()
+        .await
+        .set(seq, sleep, screen, &window)
+        .await;
     Ok(())
 }
 
@@ -1200,5 +1218,18 @@ mod tests {
             !cell.unreachable(),
             "and a cell that sent nothing has observed nothing"
         );
+    }
+}
+
+#[cfg(test)]
+mod tv_mode_tests {
+    use super::args_request_tv_mode;
+
+    #[test]
+    fn detects_tv_flag() {
+        assert!(args_request_tv_mode(["--tv"]));
+        assert!(args_request_tv_mode(["--minimized", "--tv"]));
+        assert!(!args_request_tv_mode(["--tvx", "tv"]));
+        assert!(!args_request_tv_mode(Vec::<String>::new()));
     }
 }

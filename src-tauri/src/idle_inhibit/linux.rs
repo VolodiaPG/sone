@@ -1,10 +1,10 @@
-//! Linux idle/screen-blanking inhibition across display servers.
+//! Linux sleep and screen locks across display servers.
 //!
-//! Probes the active display server and runs every applicable layer additively:
-//! Wayland native (zwp_idle_inhibit), X11 native (screensaver+DPMS), D-Bus
-//! (ScreenSaver/GNOME/login1), and the XDG portal as a last-resort fallback.
+//! Screen: every applicable layer additively — Wayland native
+//! (zwp_idle_inhibit), X11 native (screensaver+DPMS), D-Bus
+//! (ScreenSaver/GNOME), and the XDG portal as a last-resort fallback.
 
-use super::{dbus, wayland, x11};
+use super::{dbus, wayland, x11, LatestOnly};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisplayServer {
@@ -34,8 +34,12 @@ impl DisplayServer {
     }
 }
 
+/// Two independent locks: `sleep` keeps the computer from suspending, `screen`
+/// keeps the display from blanking or locking.
 pub struct IdleInhibitor {
-    active: bool,
+    latest: LatestOnly,
+    sleep: bool,
+    screen: bool,
     dbus: dbus::DbusInhibitor,
     x11: Option<x11::X11Inhibitor>,
     wayland: Option<wayland::WaylandInhibitor>,
@@ -44,25 +48,56 @@ pub struct IdleInhibitor {
 impl IdleInhibitor {
     pub fn new() -> Self {
         Self {
-            active: false,
+            latest: LatestOnly::default(),
+            sleep: false,
+            screen: false,
             dbus: dbus::DbusInhibitor::new(),
             x11: None,
             wayland: None,
         }
     }
 
-    /// Inhibit screen blanking + system sleep. Runs every applicable layer for
-    /// the detected display server — no short-circuit.
-    pub async fn inhibit(&mut self, window: &tauri::WebviewWindow) {
-        if self.active {
+    pub async fn set(
+        &mut self,
+        seq: u64,
+        sleep: bool,
+        screen: bool,
+        window: &tauri::WebviewWindow,
+    ) {
+        if !self.latest.accept(seq) {
             return;
         }
-        self.active = true;
+        self.set_sleep(sleep).await;
+        if screen {
+            self.hold_screen(window).await;
+        } else {
+            self.release_screen().await;
+        }
+    }
+
+    async fn set_sleep(&mut self, on: bool) {
+        if on == self.sleep {
+            return;
+        }
+        self.sleep = on;
+        if on {
+            self.dbus.hold_sleep().await;
+        } else {
+            self.dbus.release_sleep().await;
+        }
+    }
+
+    /// Runs every applicable layer for the detected display server — no
+    /// short-circuit.
+    async fn hold_screen(&mut self, window: &tauri::WebviewWindow) {
+        if self.screen {
+            return;
+        }
+        self.screen = true;
 
         let server = DisplayServer::detect();
-        log::info!("idle inhibit requested (display server: {server:?})");
+        log::info!("screen inhibit requested (display server: {server:?})");
 
-        // Layer 1: display-server native.
         match server {
             DisplayServer::Wayland => {
                 self.wayland = wayland::WaylandInhibitor::start(window);
@@ -73,35 +108,34 @@ impl IdleInhibitor {
             DisplayServer::Unknown => {}
         }
 
-        // Layer 2: D-Bus session (KDE/GNOME screen-off) — always attempt; harmless
-        // where unsupported. Returns whether a screen-keeping inhibition landed.
-        let dbus_screen = self.dbus.inhibit_screen().await;
+        let dbus_screen = self.dbus.hold_screen().await;
 
-        // Layer 3: D-Bus system suspend (logind) — always attempt.
-        self.dbus.inhibit_sleep().await;
-
-        // Layer 4: portal fallback — only if NOTHING screen-keeping succeeded.
         let native_screen = self.wayland.is_some() || self.x11.is_some();
         if !native_screen && !dbus_screen {
             log::warn!("no native/D-Bus screen inhibition succeeded; trying portal");
-            self.dbus.inhibit_portal().await;
+            self.dbus.hold_screen_portal().await;
         }
     }
 
-    pub async fn uninhibit(&mut self) {
-        if !self.active {
+    async fn release_screen(&mut self) {
+        if !self.screen {
             return;
         }
-        self.active = false;
-
+        self.screen = false;
         if let Some(mut x) = self.x11.take() {
             x.stop();
         }
         if let Some(w) = self.wayland.take() {
             w.stop();
         }
-        self.dbus.release().await;
-        log::info!("idle inhibit released");
+        self.dbus.release_screen().await;
+        log::info!("screen inhibit released");
+    }
+
+    /// Releases both (logout, exit).
+    pub async fn uninhibit(&mut self) {
+        self.set_sleep(false).await;
+        self.release_screen().await;
     }
 }
 

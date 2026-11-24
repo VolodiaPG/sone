@@ -1,13 +1,13 @@
-//! macOS idle inhibition.
+//! macOS sleep and screen locks, each an IOKit power assertion.
 //!
-//! System sleep needs no handling: coreaudiod holds a
-//! `PreventUserIdleSystemSleep` power assertion whenever an audio output
-//! device is active, so the Mac never suspends mid-playback. What macOS does
-//! NOT prevent is display sleep — and the maximized player view wants the
-//! screen to stay on, mirroring the Linux screensaver inhibitors. That is
-//! covered here with an IOKit `PreventUserIdleDisplaySleep` assertion.
+//! Sleep: `PreventUserIdleSystemSleep`. coreaudiod already holds one while an
+//! audio output device is active, but an explicit assertion also covers
+//! video and does not depend on the output device.
+//! Screen: `PreventUserIdleDisplaySleep`, which keeps the display on.
 
 use objc2_core_foundation::CFString;
+
+use super::LatestOnly;
 
 /// kIOPMAssertionLevelOn
 const ASSERTION_LEVEL_ON: u32 = 255;
@@ -23,9 +23,48 @@ extern "C" {
     fn IOPMAssertionRelease(assertion_id: u32) -> i32;
 }
 
+/// One held IOKit power assertion, released on drop.
+struct Assertion(u32);
+
+impl Assertion {
+    fn create(kind: &'static str, name: &'static str) -> Option<Self> {
+        let assertion_type = CFString::from_static_str(kind);
+        let name = CFString::from_static_str(name);
+        let mut id: u32 = 0;
+        let status = unsafe {
+            IOPMAssertionCreateWithName(&*assertion_type, ASSERTION_LEVEL_ON, &*name, &mut id)
+        };
+        if status == 0 {
+            log::debug!("[idle_inhibit]: {kind} assertion created (id={id})");
+            Some(Self(id))
+        } else {
+            log::warn!("[idle_inhibit]: IOPMAssertionCreateWithName({kind}) failed: {status:#x}");
+            None
+        }
+    }
+}
+
+impl Drop for Assertion {
+    fn drop(&mut self) {
+        unsafe { IOPMAssertionRelease(self.0) };
+        log::debug!("[idle_inhibit]: assertion released (id={})", self.0);
+    }
+}
+
+/// Creates the assertion when `on` and none is held, drops it when `!on`.
+fn hold(slot: &mut Option<Assertion>, on: bool, kind: &'static str, name: &'static str) {
+    if !on {
+        *slot = None;
+    } else if slot.is_none() {
+        *slot = Assertion::create(kind, name);
+    }
+}
+
 #[derive(Default)]
 pub struct IdleInhibitor {
-    assertion_id: Option<u32>,
+    latest: LatestOnly,
+    sleep: Option<Assertion>,
+    screen: Option<Assertion>,
 }
 
 impl IdleInhibitor {
@@ -33,37 +72,34 @@ impl IdleInhibitor {
         Self::default()
     }
 
-    pub async fn inhibit(&mut self, _window: &tauri::WebviewWindow) {
-        if self.assertion_id.is_some() {
+    pub async fn set(
+        &mut self,
+        seq: u64,
+        sleep: bool,
+        screen: bool,
+        _window: &tauri::WebviewWindow,
+    ) {
+        if !self.latest.accept(seq) {
             return;
         }
-        let assertion_type = CFString::from_static_str("PreventUserIdleDisplaySleep");
-        let name = CFString::from_static_str("SONE maximized player is visible");
-        let mut id: u32 = 0;
-        let status = unsafe {
-            IOPMAssertionCreateWithName(&*assertion_type, ASSERTION_LEVEL_ON, &*name, &mut id)
-        };
-        if status == 0 {
-            self.assertion_id = Some(id);
-            log::debug!("[idle_inhibit]: display-sleep assertion created (id={id})");
-        } else {
-            log::warn!("[idle_inhibit]: IOPMAssertionCreateWithName failed: {status:#x}");
-        }
+        hold(
+            &mut self.sleep,
+            sleep,
+            "PreventUserIdleSystemSleep",
+            "SONE is playing",
+        );
+        hold(
+            &mut self.screen,
+            screen,
+            "PreventUserIdleDisplaySleep",
+            "SONE player is on screen",
+        );
     }
 
+    /// Releases both (logout, exit).
     pub async fn uninhibit(&mut self) {
-        if let Some(id) = self.assertion_id.take() {
-            unsafe { IOPMAssertionRelease(id) };
-            log::debug!("[idle_inhibit]: display-sleep assertion released (id={id})");
-        }
-    }
-}
-
-impl Drop for IdleInhibitor {
-    fn drop(&mut self) {
-        if let Some(id) = self.assertion_id.take() {
-            unsafe { IOPMAssertionRelease(id) };
-        }
+        self.sleep = None;
+        self.screen = None;
     }
 }
 

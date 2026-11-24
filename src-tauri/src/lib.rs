@@ -20,6 +20,8 @@ mod pipeline_probe;
 mod theme_config;
 #[cfg(target_os = "linux")]
 mod tray;
+#[cfg(target_os = "linux")]
+mod window_state;
 mod tidal_api;
 mod tidal_report;
 pub mod mcp;
@@ -669,11 +671,16 @@ pub fn run() {
         .setup(|app| {
             // Single-instance: focus existing window if launched again
             app.handle().plugin(
-                tauri_plugin_single_instance::init(|app, _args, _cwd| {
+                tauri_plugin_single_instance::init(|app, args, _cwd| {
                     if let Some(window) = app.get_webview_window("main") {
                         let _ = window.show();
                         let _ = window.unminimize();
                         let _ = window.set_focus();
+                    }
+                    // `sone --tv` while already running switches the open
+                    // window to the TV interface.
+                    if commands::utility::args_request_tv_mode(args.iter().skip(1)) {
+                        let _ = app.emit("tv-mode:enter", ());
                     }
                 }),
             )?;
@@ -919,6 +926,9 @@ pub fn run() {
                     window.set_decorations(true).ok();
                 }
 
+                #[cfg(target_os = "linux")]
+                window_state::watch(&window);
+
                 let _ = window.show();
                 let _ = window.set_focus();
             }
@@ -1161,7 +1171,10 @@ pub fn run() {
             commands::utility::set_enable_logging,
             commands::utility::open_log_folder,
             commands::utility::get_decorations,
+            commands::utility::get_launch_tv_mode,
             commands::utility::set_decorations,
+            #[cfg(target_os = "linux")]
+            window_state::is_window_fullscreen,
             commands::utility::get_volume_normalization,
             commands::utility::set_volume_normalization,
             commands::utility::update_tray_tooltip,
@@ -1191,8 +1204,7 @@ pub fn run() {
             commands::utility::get_proxy_status,
             commands::utility::test_proxy_connection,
             commands::utility::probe_proxy_reachability,
-            commands::utility::inhibit_idle,
-            commands::utility::uninhibit_idle,
+            commands::utility::set_idle_inhibit,
             // mcp
             commands::mcp::mcp_get_connection_info,
             commands::mcp::mcp_publish_state,

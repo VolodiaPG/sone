@@ -6,6 +6,7 @@ import {
   systemAppearanceAtom,
 } from "../../atoms/theme";
 import {
+  DEFAULT_THEME,
   PRESET_THEMES,
   DEFAULT_AUTO_THEME,
   deriveTheme,
@@ -118,7 +119,7 @@ export default function ThemesTab() {
   const handleReset = () => {
     const defaultTheme = auto.enabled
       ? DEFAULT_AUTO_THEME[editing]
-      : PRESET_THEMES[0];
+      : DEFAULT_THEME;
     setLocalAccent(defaultTheme.accent);
     setLocalBg(defaultTheme.bgBase);
     setActivePreset(defaultTheme.name);

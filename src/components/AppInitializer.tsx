@@ -16,7 +16,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { parseTidalUrl } from "../lib/tidalUrl";
-import { updateToastSeenAtom } from "../atoms/updates";
+import { updateInfoAtom, updateToastSeenAtom } from "../atoms/updates";
 import { shouldShowUpdateToast, type UpdateInfo } from "../lib/updateToast";
 import { refreshApp } from "../lib/refreshApp";
 
@@ -45,7 +45,7 @@ import {
   queueAtom,
   historyAtom,
   volumeAtom,
-  preMuteVolumeAtom,
+  toggleMute,
   exclusiveModeAtom,
   bitPerfectAtom,
   exclusiveSupportedAtom,
@@ -71,6 +71,8 @@ import {
   maximizedPlayerAtom,
 } from "../atoms/ui";
 import { themeAtom } from "../atoms/theme";
+import { tvModeAtom, tvVolumeOnTvAtom } from "../atoms/tv";
+import { TV_VOLUME_STEP } from "./tv/tvKeys";
 import { proxySettingsAtom, type ProxySettings } from "../atoms/proxy";
 import {
   syncThemeToFile,
@@ -92,6 +94,9 @@ import { useFavorites } from "../hooks/useFavorites";
 import { useShortcuts } from "../hooks/useShortcuts";
 import { useMcpBridge } from "../hooks/useMcpBridge";
 import { useOverlayBridge } from "../hooks/useOverlayBridge";
+import { useMprisFullscreen } from "../hooks/useMprisFullscreen";
+import { useFullscreenEscape } from "../hooks/useFullscreenEscape";
+import { useIdleInhibit } from "../hooks/useIdleInhibit";
 import { useToast } from "../contexts/ToastContext";
 import {
   checkNetworkError,
@@ -107,6 +112,7 @@ import {
   getTrack,
   getProfile,
   getFeed,
+  invalidateCache,
 } from "../api/tidal";
 import { pickProfileAvatarHref } from "./ProfilePage";
 import { OPEN_SETTINGS_EVENT } from "./ProxyNoticeBanner";
@@ -262,6 +268,7 @@ export function AppInitializer() {
   useEffect(() => {
     invoke<UpdateInfo>("check_for_update")
       .then((info) => {
+        store.set(updateInfoAtom, info);
         const { show, next } = shouldShowUpdateToast(
           info,
           store.get(updateToastSeenAtom),
@@ -418,6 +425,8 @@ export function AppInitializer() {
   // ================================================================
   useEffect(() => {
     const handler = () => {
+      // Every TV screen says so in place, with its own Try again.
+      if (store.get(tvModeAtom)) return;
       const proxyEnabled = store.get(proxySettingsAtom).enabled;
       showToast(
         proxyEnabled
@@ -871,6 +880,17 @@ export function AppInitializer() {
     };
   }, [store]);
 
+  // An outdated mix is re-fetched in the background; drop the in-memory copy
+  // so the next open gets the new one.
+  useEffect(() => {
+    const unlisten = listen<string>("mix-page-refreshed", (event) => {
+      invalidateCache(`mix-page:${event.payload}`);
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
+
   // ================================================================
   //  VOLUME SYNC to backend (one-time, reads volume from store)
   // ================================================================
@@ -1319,12 +1339,6 @@ export function AppInitializer() {
       }
       handleDeepLink(url);
     });
-    const unlistenFullscreen = listen<boolean>(
-      "mpris:set-fullscreen",
-      (event) => {
-        store.set(maximizedPlayerAtom, event.payload);
-      },
-    );
     return () => {
       unlistenSeek.then((fn) => fn());
       unlistenVolume.then((fn) => fn());
@@ -1332,41 +1346,37 @@ export function AppInitializer() {
       unlistenLoop.then((fn) => fn());
       unlistenSetPosition.then((fn) => fn());
       unlistenOpenUri.then((fn) => fn());
-      unlistenFullscreen.then((fn) => fn());
     };
   }, [store, setVolume, toggleShuffle, seekTo]);
 
-  useEffect(() => {
-    const push = () => {
-      invoke("update_mpris_fullscreen", {
-        fullscreen: store.get(maximizedPlayerAtom),
-      }).catch(() => {});
-    };
-    push();
-    return store.sub(maximizedPlayerAtom, push);
-  }, [store]);
+  useMprisFullscreen();
+  useFullscreenEscape();
+  useIdleInhibit();
 
   // ================================================================
   //  KEYBOARD SHORTCUTS
   //  Configurable via shortcutsAtom (see src/lib/shortcuts.ts).
   //  Action callbacks are stable; store.get() reads at call-time.
   // ================================================================
+  // TV mode steps finer, like its remote volume keys.
+  // In TV mode with the TV's remote setting the volume, SONE's stays put.
+  const volumeOnTv = () => store.get(tvModeAtom) && store.get(tvVolumeOnTvAtom);
+  const stepVolume = (dir: 1 | -1) => {
+    if (volumeOnTv()) return;
+    const step = store.get(tvModeAtom) ? TV_VOLUME_STEP : 0.1;
+    const next = Math.round((store.get(volumeAtom) + dir * step) * 100) / 100;
+    setVolume(Math.min(1, Math.max(0, next)));
+  };
   useShortcuts({
     playPause: () => {
       togglePlayPause();
     },
     nextTrack: () => playNext({ explicit: true }),
     prevTrack: () => playPrevious(),
-    volumeUp: () => setVolume(Math.min(1.0, store.get(volumeAtom) + 0.1)),
-    volumeDown: () => setVolume(Math.max(0.0, store.get(volumeAtom) - 0.1)),
+    volumeUp: () => stepVolume(1),
+    volumeDown: () => stepVolume(-1),
     muteToggle: () => {
-      const vol = store.get(volumeAtom);
-      if (vol > 0) {
-        store.set(preMuteVolumeAtom, vol);
-        setVolume(0);
-      } else {
-        setVolume(store.get(preMuteVolumeAtom) || 0.5);
-      }
+      if (!volumeOnTv()) toggleMute(store, setVolume);
     },
     likeToggle: () => {
       const track = store.get(currentTrackAtom);
